@@ -1,0 +1,83 @@
+# SearXNG for Agents' web_search (copied to ~/Library/Application Support/HaloAgents/searxng/settings.yml by
+# tools/setup_agents_tools.sh). StrixFold UI passes the port (SEARXNG_PORT) and the secret (SEARXNG_SECRET) when it
+# starts it. Bound to 127.0.0.1 only; no image proxy and no result proxy, so it never fetches arbitrary URLs.
+#
+# Engines (an allowlist; every other engine, including the local-file, command, database and URL-fetching adapters,
+# is left out of the effective config): duckduckgo web, brave, startpage, mojeek, bing, yahoo, wikipedia (with "list"
+# display, so hits come back as results) and arxiv (papers, also in the general category). Left off: google and qwant
+# (both answered "access denied" from this Mac) and duckduckgo's html engine (it asked for a CAPTCHA).
+# The model never picks engines or options: the client sends only the query, with SearXNG's !bang, :language and
+# <timeout syntax taken out. Every plugin is off. JSON output on (the client's format); the limiter stays off (it is
+# for public instances and needs Valkey). Each engine gets a 4 s timeout and one retry.
+use_default_settings:
+  engines:
+    keep_only: ["duckduckgo web", brave, startpage, mojeek, bing, yahoo, wikipedia, arxiv]
+
+general:
+  instance_name: "Agents search"
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  favicon_resolver: ""
+  formats: [html, json]
+
+server:
+  bind_address: "127.0.0.1"
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  method: "GET"
+
+valkey:
+  url: false
+
+outgoing:
+  request_timeout: 4.0
+  max_request_timeout: 8.0
+  retries: 1
+  pool_connections: 20
+  pool_maxsize: 10
+
+engines:
+  - name: duckduckgo web
+    disabled: false
+  - name: startpage
+    inactive: false
+  - name: mojeek
+    inactive: false
+  - name: bing
+    disabled: false
+  - name: yahoo
+    disabled: false
+  - name: wikipedia
+    display_type: ["infobox", "list"]
+  - name: arxiv
+    categories: [general, science, scientific publications]
+    timeout: 6.0
+    disabled: false
+
+plugins:
+  searx.plugins.calculator.SXNGPlugin:
+    active: false
+  searx.plugins.infinite_scroll.SXNGPlugin:
+    active: false
+  searx.plugins.hash_plugin.SXNGPlugin:
+    active: false
+  searx.plugins.self_info.SXNGPlugin:
+    active: false
+  searx.plugins.unit_converter.SXNGPlugin:
+    active: false
+  searx.plugins.ahmia_filter.SXNGPlugin:
+    active: false
+  searx.plugins.hostnames.SXNGPlugin:
+    active: false
+  searx.plugins.time_zone.SXNGPlugin:
+    active: false
+  searx.plugins.oa_doi_rewrite.SXNGPlugin:
+    active: false
+  searx.plugins.tor_check.SXNGPlugin:
+    active: false
+  searx.plugins.tracker_url_remover.SXNGPlugin:
+    active: false

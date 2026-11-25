@@ -1,0 +1,20 @@
+[Unit]
+Description=StrixFold UI box agent (halod): serves one model on box1+box2 through the GPU lock protocol
+Documentation=file://%h/halo-control/README.md
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/halo-control/box/halod.py
+Restart=on-failure
+RestartSec=5
+# Only halod itself stops on a restart: the ranks and their lock holders (started through the deploy's scripts with
+# nohup) keep running and the new halod re-adopts them from their pid files.
+KillMode=process
+Environment=PYTHONUNBUFFERED=1
+# Max speed: if halod set the performance platform profile and did not put it back (a crash), this does
+ExecStopPost=/usr/bin/python3 %h/halo-control/box/halod.py --restore-power
+Nice=5
+
+[Install]
+WantedBy=default.target

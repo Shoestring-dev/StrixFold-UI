@@ -1,0 +1,5 @@
+{
+ "_source": "A GPU window qbench (box1): one prompt of about 70,000 tokens sent on purpose to each engine serving a 65,536-token window; status and body exactly as returned",
+ "kyojin": {"status": 400, "body": "{\"error\": {\"message\": \"context length exceeded: prompt is 69632 tokens, the server context is 65536\", \"type\": \"invalid_request_error\", \"code\": 400}}", "window": 65536, "prompt": 69632},
+ "gufo21": {"status": 400, "body": "{\"error\":{\"message\":\"prompt exceeds the 65536-token context; increase --context or shorten the conversation\",\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\"}}", "window": 65536, "prompt": null}
+}

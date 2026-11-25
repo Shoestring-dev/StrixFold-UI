@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="halo-ui-token" content="__HALO_UI_TOKEN__">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<!-- no app manifest here: an app added from the LAN dashboard would open pages the LAN refuses (the tailnet page has it) -->
+<title>StrixFold UI</title>
+<script src="/ui/theme.js"></script>
+<script src="/ui/side-collapse.js"></script>
+<link rel="preload" href="/ui/fonts/InterTight-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/ui/app.css">
+<link rel="stylesheet" href="/ui/chat.css">
+<link rel="stylesheet" href="/ui/studio.css">
+<link rel="stylesheet" href="/ui/halo-chat.css">
+<link rel="icon" href="/ui/icon-192.png" type="image/png">
+<link rel="stylesheet" href="/ui/polish.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="fakebar" id="fakebar" hidden>Fake backend: nothing here runs on the GPUs. Start <code>halo-control</code> without <code>--fake</code> for the real boxes.</div>
+<div class="app" id="app">
+<aside class="side" id="side" aria-label="Chats and pages">
+  <div class="side-top">
+    <a class="brand" href="#/talk" aria-label="StrixFold UI, new chat"><img class="mark" src="/ui/icon-192.png" alt="" width="24" height="24"><span>StrixFold UI</span></a>
+    <button type="button" class="side-collapse" id="side-collapse" aria-label="Collapse sidebar" aria-controls="side" aria-expanded="true" title="Collapse sidebar (⌘\)"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9.5 4.5v15"/></svg></button>
+    <button type="button" class="icon-btn side-close" id="side-close" aria-label="Close menu">×</button>
+  </div>
+  <nav class="side-mode" aria-label="Section" hidden>
+    <a href="#/chat" id="mode-chat" class="on" aria-current="page">Lab chat</a>
+    <a href="#/talk" id="mode-studio">StrixFold UI</a>
+  </nav>
+  <div class="side-block" id="side-chat" hidden>
+  <p class="lab-note">Lab chat: the dashboard's own chat, kept in the private store behind the passcode, like StrixFold UI's.</p>
+  <button type="button" class="newchat" id="new-chat"><span aria-hidden="true">+</span> New lab chat</button>
+  <label class="side-search"><span class="sr">Search chats</span><input type="search" id="chat-search" placeholder="Search lab chats" autocomplete="off"></label>
+  <nav class="chat-list" id="chat-list" aria-label="Chats"></nav>
+  <nav class="side-pages" aria-label="Pages">
+    <a href="#/models" data-page="models">Models &amp; profiles</a>
+    <a href="#/agents" data-page="agents">Agents</a>
+    <a href="#/boxes" data-page="boxes">Boxes &amp; GPUs</a>
+    <a href="#/requests" data-page="requests">Requests</a>
+    <a href="#/connect" data-page="connect">Connect</a>
+    <a href="#/settings" data-page="settings">Settings</a>
+  </nav>
+  </div>
+<!-- studio:side -->
+  <div class="side-block h-side" id="side-studio" hidden>
+  <button type="button" class="h-new" id="s-new"><span class="h-new-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span class="h-t">New session</span></button>
+  <button type="button" class="h-row h-search-btn" id="s-search-btn" aria-label="Search chats" aria-expanded="false" aria-controls="s-search-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg><span class="h-t">Search</span></button>
+  <label class="side-search h-search" id="s-search-wrap" hidden><span class="sr">Search chats</span><input type="search" id="s-search" placeholder="Search chats" autocomplete="off"></label>
+  <nav class="side-pages h-nav" aria-label="StrixFold UI">
+    <a href="#/projects" data-page="projects"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5h16v10a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5z"/><path d="M4 8.5l1.6-3h4.8l1.6 3"/></svg>Projects</a>
+  </nav>
+  <div class="h-recents-head">
+    <p class="h-label" id="h-recents-h">Recents</p>
+  </div>
+  <nav class="chat-list h-recents" id="s-list" aria-labelledby="h-recents-h"></nav>
+  <details class="s-else" id="s-else" hidden><summary>Open elsewhere</summary><div class="s-else-rows" id="s-else-rows"></div></details>
+  <div class="h-foot">
+    <a class="h-avatar h-account" id="h-avatar" href="#/studio-settings" title="Settings"><span class="h-ini" id="h-initials"></span><span class="h-t">Settings</span></a>
+    <button type="button" class="h-pill" id="s-new-foot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>New session</span></button>
+  </div>
+  </div>
+<!-- /studio:side -->
+</aside>
+<div class="scrim" id="scrim" hidden></div>
+<div class="main-col">
+<header class="topbar">
+  <button type="button" class="side-show" id="side-show" aria-label="Show sidebar" aria-controls="side" aria-expanded="true" title="Show sidebar (⌘\)"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9.5 4.5v15"/></svg></button>
+  <button type="button" class="icon-btn menu" id="open-side" aria-label="Open menu" aria-controls="side" aria-expanded="false"><i></i><i></i><i></i></button>
+  <a class="chip" id="status-chip" href="#/boxes" aria-label="Model status, open Boxes and GPUs"><span class="chip-dot" id="chip-dot"></span><span class="chip-model" id="hd-model">DeepSeek V4.1 Flash</span><span class="chip-state" id="chip-state">Connecting</span></a>
+  <p class="topbar-conn" id="hd-conn">Connecting…</p>
+  <div class="topbar-right">
+    <button type="button" class="t-ctx-top" id="t-ctx-top" aria-haspopup="dialog" aria-controls="t-sheet" hidden><svg class="t-ring" id="t-ring-top" viewBox="0 0 20 20" aria-hidden="true"><circle class="t-ring-bg" cx="10" cy="10" r="7.5"/><circle class="t-ring-fg" id="t-ring-top-fg" cx="10" cy="10" r="7.5"/></svg><span id="t-ctx-top-pct"></span></button>
+    <button type="button" class="textbtn" id="chat-settings-btn" hidden>Lab chat settings</button>
+  </div>
+</header>
+<main id="main">
+<section class="page page-chat" id="page-chat" aria-label="Chat" hidden>
+  <div class="thread" id="thread"></div>
+  <p class="sr" id="chat-status" aria-live="polite"></p>
+  <div class="composer-wrap" id="composer-wrap">
+    <div class="startbar" id="startbar" hidden>
+      <p class="startbar-text" id="startbar-text"></p>
+      <div class="startbar-progress" id="startbar-progress" hidden><span class="sb-step" id="sb-step"></span><span class="sb-bar"><i id="sb-fill"></i></span><span class="sb-detail" id="sb-detail"></span></div>
+      <button type="button" class="pill pill-s" id="startbar-go"><span class="pill-fill" aria-hidden="true"></span><span class="pill-label" id="startbar-label">Start</span><i class="pill-arrow" aria-hidden="true"></i></button>
+    </div>
+    <form class="composer" id="composer" novalidate>
+      <div class="attach-list" id="attach-list"></div>
+      <label class="sr" for="prompt">Message</label>
+      <textarea id="prompt" rows="1" placeholder="Message the model" autocomplete="off"></textarea>
+      <div class="composer-row">
+        <button type="button" class="model-pick" id="model-pick" aria-haspopup="listbox" aria-expanded="false"><span id="model-pick-name">DeepSeek V4.1 Flash</span><small id="model-pick-profile"></small></button>
+        <label class="think-toggle"><input type="checkbox" id="think"> <span>Thinking</span></label>
+        <label class="attach-btn" title="Attach text or code files" aria-label="Attach text or code files"><input type="file" id="attach" multiple class="sr"><span>Attach</span></label>
+        <span class="composer-hint" id="composer-hint"></span>
+        <button type="submit" class="send" id="send" aria-label="Send"><i class="send-arrow" aria-hidden="true"></i><i class="send-stop" aria-hidden="true"></i></button>
+      </div>
+      <div class="model-menu" id="model-menu" role="listbox" hidden></div>
+    </form>
+  </div>
+</section>
+<!-- studio:pages -->
+<div class="page" id="page-studio-settings" hidden>
+<section class="wrap s-page" aria-labelledby="ss-h">
+  <div class="s-head"><h1 id="ss-h">Settings</h1><p class="s-head-note">Saved on this Mac.</p></div>
+  <section class="ss-sec" aria-labelledby="ss-look-h">
+    <div class="ss-h"><h2 id="ss-look-h">Appearance</h2><p>Kept in this browser, so each device has its own.</p></div>
+    <div class="ss-row"><span class="ss-l" id="ss-theme-l">Theme</span>
+      <div class="seg" role="radiogroup" aria-labelledby="ss-theme-l">
+        <button type="button" role="radio" aria-checked="true" data-theme-pick="system">System</button>
+        <button type="button" role="radio" aria-checked="false" data-theme-pick="light" tabindex="-1">Light</button>
+        <button type="button" role="radio" aria-checked="false" data-theme-pick="dark" tabindex="-1">Dark</button>
+      </div>
+    </div>
+  </section>
+  <div id="ss-body"></div>
+</section>
+</div>
+<div class="s-lock" id="s-lock" hidden>
+  <form class="s-lock-box" id="s-lock-form" novalidate>
+    <svg class="s-lock-mark" viewBox="0 0 48 48" aria-hidden="true"><rect x="9" y="21" width="30" height="21" rx="3"/><path d="M15 21v-6a9 9 0 0 1 18 0v6"/></svg>
+    <svg class="s-lock-mark s-down-mark" viewBox="0 0 48 48" aria-hidden="true"><path d="M6 18a26 26 0 0 1 36 0M12 25a17 17 0 0 1 24 0M18 32a8 8 0 0 1 12 0"/><circle cx="24" cy="38" r="1.6"/><path d="M8 8l32 32"/></svg>
+    <h1 id="s-lock-h">StrixFold UI is locked</h1>
+    <p id="s-lock-p">Enter the passcode to see your chats.</p>
+    <label class="s-field"><span id="s-lock-l1">Passcode</span><input type="password" id="s-lock-pass" autocomplete="current-password" required minlength="6"></label>
+    <label class="s-field" id="s-lock-again-w" hidden><span>Passcode again</span><input type="password" id="s-lock-again" autocomplete="new-password" minlength="6"></label>
+    <label class="check-s" id="s-lock-rem-w"><input type="checkbox" id="s-lock-rem" checked> <span>Remember this device for 90 days</span></label>
+    <a class="go solid s-lock-link" id="s-lock-link" href="#" hidden>Open StrixFold UI on the tailnet</a>
+    <p class="err" id="s-lock-err" aria-live="assertive"></p>
+    <button type="submit" class="go solid" id="s-lock-go">Unlock</button>
+  </form>
+</div>
+<section class="page page-chat page-talk" id="page-talk" aria-label="Chat" hidden>
+  <div class="t-head" id="t-head">
+    <h1 class="t-title" id="t-title">New chat</h1>
+    <div class="t-more-wrap">
+      <button type="button" class="h-round t-more" id="t-more" hidden aria-label="Chat options" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/></svg></button>
+      <div class="t-menu" id="t-menu" role="menu" hidden></div>
+    </div>
+  </div>
+  <div class="thread t-thread" id="t-thread"></div>
+  <div class="t-room" id="t-room" aria-hidden="true"></div>
+  <p class="sr" id="t-status" aria-live="polite"></p>
+  <div class="composer-wrap t-composer-wrap" id="t-composer-wrap">
+    <button type="button" class="t-down" id="t-down" aria-label="Jump to the latest" title="Jump to the latest" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button>
+    <div class="t-ctxwarn" id="t-ctxwarn" role="status" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg><span id="t-ctxwarn-t"></span><button type="button" class="t-ctxwarn-go" id="t-ctxwarn-go">Compact now</button></div>
+    <p class="t-perm-line" id="t-perm-line" hidden></p>
+    <p class="t-team-line" id="t-goal-line" hidden></p>
+    <p class="t-team-line" id="t-team-line" hidden></p>
+    <div class="t-offline" id="t-offline" role="alert" hidden><p id="t-offline-t"></p><span class="t-offline-b"><button type="button" class="textbtn" id="t-offline-retry">Try again</button><button type="button" class="textbtn" id="t-offline-plain">Send without tools</button></span></div>
+    <div class="startbar" id="t-bar" hidden>
+      <p class="startbar-text" id="t-bar-text"></p>
+      <button type="button" class="pill pill-s" id="t-bar-go"><span class="pill-fill" aria-hidden="true"></span><span class="pill-label" id="t-bar-label">Switch</span><i class="pill-arrow" aria-hidden="true"></i></button>
+    </div>
+    <form class="t-composer" id="t-composer" novalidate>
+      <div class="s-atts t-atts" id="t-atts"></div>
+      <label class="sr" for="t-prompt">Message</label>
+      <textarea id="t-prompt" rows="1" placeholder="Message StrixFold UI" autocomplete="off"></textarea>
+      <div class="t-row">
+        <label class="t-round t-add" id="t-add" title="Attach any file"><input type="file" id="t-file" multiple class="sr"><span class="sr" id="t-add-l">Attach any file</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></label>
+        <button type="button" class="t-perm" id="t-perm" aria-haspopup="dialog" aria-expanded="false" aria-controls="t-sheet" hidden><svg viewBox="0 0 24 24" aria-hidden="true" id="t-perm-ic"></svg><span id="t-perm-k">Off</span></button>
+        <button type="button" class="t-perm t-team lv-none" id="t-team" aria-haspopup="dialog" aria-expanded="false" aria-controls="t-sheet" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3.5 19c.6-3 2.8-5 5.5-5s4.9 2 5.5 5M15 14.4c.6-.3 1.3-.4 2-.4 2.2 0 3.9 1.6 4.4 4"/></svg><span id="t-team-k">Team</span></button>
+        <button type="button" class="t-model" id="t-model" aria-haspopup="dialog" aria-expanded="false" aria-controls="t-sheet"><span class="t-model-name" id="t-model-name">DeepSeek V4.1 Flash</span><span class="t-model-short" id="t-model-short" aria-hidden="true">V4.1</span><span class="t-model-effort" id="t-model-effort">Low</span></button>
+        <button type="button" class="t-ctx" id="t-ctx" aria-haspopup="dialog" aria-expanded="false" aria-controls="t-sheet"><svg class="t-ring" id="t-ring" viewBox="0 0 20 20" aria-hidden="true" hidden><circle class="t-ring-bg" cx="10" cy="10" r="7.5"/><circle class="t-ring-fg" id="t-ring-fg" cx="10" cy="10" r="7.5"/></svg><span class="t-ctx-pct" id="t-ctx-pct"></span><span id="t-ctx-k">64K</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg></button>
+        <span class="t-spacer"></span>
+        <button type="button" class="t-round t-mic" id="t-mic" aria-label="Dictate"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/></svg></button>
+        <button type="button" class="t-send stop t-stop" id="t-stop" aria-label="Stop" title="Stop" hidden><svg class="t-send-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg></button>
+        <button type="submit" class="t-send" id="t-send" aria-label="Send"><svg class="t-send-up" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg><svg class="t-send-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg></button>
+      </div>
+    </form>
+    <div class="t-sheet-wrap" id="t-sheet-wrap" hidden>
+      <div class="t-scrim" id="t-scrim"></div>
+      <div class="t-sheet" id="t-sheet" role="dialog" aria-modal="true" aria-labelledby="t-sheet-h">
+        <div class="t-grab" aria-hidden="true"></div>
+        <div class="t-sheet-head">
+          <button type="button" class="h-round t-sheet-x" id="t-sheet-x" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          <h2 id="t-sheet-h">Select model</h2>
+        </div>
+        <div class="t-sheet-body" id="t-sheet-body"></div>
+      </div>
+    </div>
+  </div>
+</section>
+<div class="page" id="page-projects" hidden>
+<section class="wrap s-page p-page" aria-labelledby="p-h">
+  <div class="s-head"><h1 id="p-h">Projects</h1><p class="s-head-note" id="p-note">Folders of chats that share instructions.</p></div>
+  <div id="p-body"></div>
+</section>
+</div>
+<!-- /studio:pages -->
+<div class="page" id="page-models" hidden>
+<section class="hero wrap" id="top" aria-labelledby="state-word">
+  <h1 class="state" id="state-word" aria-live="polite">Connecting.</h1>
+  <p class="state-reason" id="state-reason"></p>
+  <details class="team-who" id="team-who" hidden><summary>Who is using them</summary><p id="team-who-list"></p></details>
+  <div class="hero-grid">
+    <dl class="facts" id="facts">
+      <div><dt>Model</dt><dd><span id="f-model">DeepSeek-V4.1-Flash-1017 · EXL3 2.9 bpw</span><span class="f-warn" id="f-warn" hidden></span></dd></div>
+      <div><dt>Profile</dt><dd id="f-profile">–</dd></div>
+      <div><dt>Uptime</dt><dd id="f-uptime" class="num">–</dd></div>
+      <div><dt>Endpoint</dt><dd class="f-endpoint"><code id="f-endpoint">http://127.0.0.1:18080/v1</code> <button type="button" class="copy" data-copy-from="f-endpoint">Copy</button></dd></div>
+      <div><dt>Idle stop</dt><dd id="f-idle">–</dd></div>
+      <div><dt>Deploy</dt><dd id="f-deploy" class="num">–</dd></div>
+      <div><dt>Agents</dt><dd id="f-agents">–</dd></div>
+    </dl>
+    <figure class="linkbox">
+      <div class="linkbox-box"><canvas id="linkcanvas" aria-hidden="true"></canvas>
+        <span class="lb-tag lb-l" id="lb-h1">box1 · rank 0</span><span class="lb-tag lb-r" id="lb-h2">box2 · rank 1</span></div>
+      <figcaption class="linkbox-cap"><i class="dot" id="cap-dot"></i> <span id="cap-text">Two boxes, two USB4 cables.</span></figcaption>
+    </figure>
+    <div class="actions" id="actions">
+      <button type="button" class="pill" id="primary"><span class="pill-fill" aria-hidden="true"></span><span class="pill-label" id="primary-label">Start</span><i class="pill-arrow" aria-hidden="true"></i></button>
+      <button type="button" class="textbtn" id="restart" hidden>Restart</button>
+      <label class="hold" id="hold-wrap" hidden><input type="checkbox" id="hold"> <span>Keep running (no idle stop)</span></label>
+    </div>
+  </div>
+</section>
+<section class="seq wrap" aria-labelledby="seq-h">
+  <div class="seq-top"><h2 class="label" id="seq-h">Start sequence</h2><p class="seq-count num" id="seq-count" aria-hidden="true"></p></div>
+  <div class="seq-body">
+    <canvas class="seq-canvas" id="seqcanvas" aria-hidden="true"></canvas>
+    <ol class="seq-list" id="seq-list">
+      <li class="seq-step" data-step="waiting"><span class="seq-n">01</span><span class="seq-mark" aria-hidden="true"></span><h3 class="seq-title">Waiting for GPUs</h3><p class="seq-t num">–</p><p class="seq-d">The GPU lock: box1 first, then box2, both or neither.</p></li>
+      <li class="seq-step" data-step="loading"><span class="seq-n">02</span><span class="seq-mark" aria-hidden="true"></span><h3 class="seq-title">Loading weights</h3><p class="seq-t num">–</p><p class="seq-d">Each box reads its 95 GiB rank cache into GPU memory.</p></li>
+      <li class="seq-step" data-step="linking"><span class="seq-n">03</span><span class="seq-mark" aria-hidden="true"></span><h3 class="seq-title">Linking ranks</h3><p class="seq-t num">–</p><p class="seq-d">The ranks connect over both USB4 cables and agree on the build.</p></li>
+      <li class="seq-step" data-step="ready"><span class="seq-n">04</span><span class="seq-mark" aria-hidden="true"></span><h3 class="seq-title">Ready</h3><p class="seq-t num">–</p><p class="seq-d">A first request must answer correctly before agents get the endpoint.</p></li>
+    </ol>
+  </div>
+</section>
+<section class="models wrap" id="models" aria-labelledby="models-h">
+  <div class="sec-head"><h2 class="label" id="models-h">Model</h2><p class="sec-note">Pick the model first; its profiles are below.</p></div>
+  <ul class="model-list" id="model-list" role="radiogroup" aria-labelledby="models-h"></ul>
+</section>
+<section class="profiles wrap" id="profiles" aria-labelledby="profiles-h">
+  <div class="sec-head"><h2 class="label" id="profiles-h">Profiles<sup id="profiles-n"></sup></h2>
+    <p class="sec-note">One runs at a time; starting another stops the one running. <button type="button" class="textbtn" id="prof-export">Export custom</button> · <label class="textbtn filebtn">Import<input type="file" id="prof-import" accept="application/json,.json" class="sr"></label></p></div>
+  <ul class="prof-list" id="prof-list"></ul>
+</section>
+</div>
+<div class="page" id="page-agents" hidden>
+<section class="agents wrap" id="agents" aria-labelledby="agents-h">
+  <div class="sec-head"><h2 class="label" id="agents-h">Agents<sup id="agents-n"></sup></h2><p class="sec-note" id="agents-note">Sessions on this Mac against the model. At most the profile's parallel requests run at once.</p></div>
+  <div class="ag-top">
+    <button type="button" class="go" id="ag-new" aria-expanded="false" aria-controls="ag-form">New session</button>
+    <button type="button" class="textbtn danger" id="ag-stop-all" hidden>Stop all</button>
+  </div>
+  <form class="ag-form" id="ag-form" hidden novalidate>
+    <div class="ag-fields">
+      <label class="afield"><span>Name</span><input id="ag-name" maxlength="80" autocomplete="off" placeholder="from the task"></label>
+      <label class="afield"><span>Work directory</span><input id="ag-workdir" autocomplete="off" spellcheck="false" placeholder="empty: a private folder for this session"><em class="err" data-agerr="workdir"></em></label>
+      <label class="afield wide"><span>Task</span><textarea id="ag-task" rows="4" placeholder="What should the agent find out or explain?"></textarea><em class="err" data-agerr="task"></em></label>
+      <fieldset class="afield"><legend>Agent</legend>
+        <label class="check-s"><input type="radio" name="ag-adapter" value="builtin" checked> <span>Built-in: reads files only (list, read, grep, find); no shell, no writes</span></label>
+        <label class="check-s"><input type="radio" name="ag-adapter" value="command"> <span>Command: another CLI agent, run on this Mac as you</span></label>
+      </fieldset>
+      <label class="afield"><span>Profile</span><select id="ag-profile"></select><em class="err" data-agerr="profile"></em>
+        <span class="check-s"><input type="checkbox" id="ag-startprof" checked> <span>Start it if nothing is running</span></span></label>
+      <p class="afield wide ag-warn" id="ag-warn" hidden></p>
+      <label class="afield ag-cmd" hidden><span>Command</span><input id="ag-command" autocomplete="off" spellcheck="false" placeholder="omp -p {task}"><em class="err" data-agerr="command"></em>
+        <small>Split like a shell would, never run by one. {task} becomes the task. OPENAI_BASE_URL, OPENAI_API_KEY and OPENAI_MODEL are set.</small></label>
+      <label class="afield ag-cmd" hidden><span>Environment (KEY=VALUE lines)</span><textarea id="ag-env" rows="2" spellcheck="false"></textarea><em class="err" data-agerr="env"></em></label>
+      <label class="afield ag-bi"><span>Turns at most</span><input id="ag-turns" inputmode="numeric" value="40"><em class="err" data-agerr="max_turns"></em></label>
+      <label class="afield"><span>Reply cap per request (max_tokens)</span><input id="ag-maxtok" inputmode="numeric" value="2048"><em class="err" data-agerr="max_tokens"></em></label>
+    </div>
+    <p class="err" id="ag-general" aria-live="assertive"></p>
+    <div class="ag-submit"><button type="submit" class="go solid" id="ag-go">Queue session</button><button type="button" class="textbtn" id="ag-cancel">Close</button>
+      <span class="ag-hint">Requests use temperature 0 and always send max_tokens.</span></div>
+  </form>
+  <div class="table-scroll"><table class="req-table ag-table">
+    <thead><tr><th scope="col">Session</th><th scope="col">Status</th><th scope="col">Turns</th><th scope="col">Prompt tokens</th><th scope="col">Cached</th><th scope="col">Output</th><th scope="col">Elapsed</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
+    <tbody id="ag-body"><tr><td colspan="8" class="empty">No sessions yet.</td></tr></tbody>
+  </table></div>
+  <div class="ag-log" id="ag-log" hidden>
+    <div class="ag-log-head"><h3 id="ag-log-h">Log</h3><div class="tabs" role="tablist" aria-label="Session view"><button type="button" role="tab" class="tab" id="ag-tab-log" aria-selected="true">Log</button><button type="button" role="tab" class="tab" id="ag-tab-result" aria-selected="false" tabindex="-1">Answer</button></div><button type="button" class="textbtn" id="ag-log-close">Close</button></div>
+    <pre class="ag-log-body" id="ag-log-body" tabindex="0"></pre>
+  </div>
+</section>
+</div>
+<div class="page" id="page-boxes" hidden>
+<section class="boxes wrap" id="boxes" aria-labelledby="boxes-h">
+  <div class="sec-head"><h2 class="label" id="boxes-h">Boxes</h2><p class="sec-note" id="boxes-note">Read every 2 seconds. Power profile is shown, never changed.</p></div>
+  <div class="boxes-fail" id="boxes-fail" role="status" hidden><p id="boxes-fail-t"></p><button type="button" class="go solid" id="boxes-restart">Start it again</button></div>
+  <div class="box-grid" id="box-grid"></div>
+</section>
+<section class="team wrap" id="team" aria-labelledby="team-h">
+  <div class="sec-head"><h2 class="label" id="team-h">GPUs and locks</h2><p class="sec-note">StrixFold UI takes rank 0's lock, then rank 1's, and never takes one that someone holds.</p></div>
+  <div class="team-grid" id="team-grid"></div>
+</section>
+</div>
+<div class="page" id="page-requests" hidden>
+<section class="metrics wrap" id="metrics" aria-labelledby="metrics-h">
+  <div class="sec-head"><h2 class="label" id="metrics-h">Live metrics</h2><p class="sec-note" id="metrics-note">Medians of the last 20 requests.</p></div>
+  <div class="metric-grid">
+    <div class="metric"><p class="m-label">Decode</p><p class="m-val"><span class="m-num" id="m-decode" data-flap>–</span><span class="m-unit">tok/s</span></p><p class="m-sub" id="m-decode-live"></p></div>
+    <div class="metric"><p class="m-label">Prompt reading</p><p class="m-val"><span class="m-num" id="m-prefill" data-flap>–</span><span class="m-unit">tok/s</span></p><p class="m-sub" id="m-prefill-live"></p></div>
+    <div class="metric"><p class="m-label">Time to first token</p><p class="m-val"><span class="m-num" id="m-ttft" data-flap>–</span><span class="m-unit">s</span></p><p class="m-sub">server side</p></div>
+    <div class="metric"><p class="m-label">Prompt cache hits</p><p class="m-val"><span class="m-num" id="m-cache" data-flap>–</span><span class="m-unit">%</span></p><p class="m-sub">of prompt tokens</p></div>
+    <div class="metric"><p class="m-label">Draft acceptance</p><p class="m-val"><span class="m-num" id="m-accept" data-flap>–</span><span class="m-unit">%</span></p><p class="m-sub">DSpark drafts kept</p></div>
+  </div>
+  <div class="spark-wrap"><canvas class="spark" id="spark" aria-label="Decode speed of recent requests" role="img"></canvas>
+    <p class="spark-legend"><span><i class="lg lg-ink"></i>decode tok/s per request</span><span><i class="lg lg-red"></i>time to first token</span></p></div>
+</section>
+<section class="requests wrap" id="requests" aria-labelledby="req-h">
+  <div class="sec-head"><h2 class="label" id="req-h">Recent requests</h2><p class="sec-note">From the server's log and /metrics. StrixFold UI's own checks are left out.</p></div>
+  <div class="table-scroll"><table class="req-table">
+    <thead><tr><th scope="col">Time</th><th scope="col">Prompt</th><th scope="col">Cached</th><th scope="col">Output</th><th scope="col">TTFT</th><th scope="col">Prompt tok/s</th><th scope="col">Decode tok/s</th><th scope="col">Drafts kept</th><th scope="col">Finish</th></tr></thead>
+    <tbody id="req-body"><tr><td colspan="9" class="empty">No requests yet.</td></tr></tbody>
+  </table></div>
+</section>
+</div>
+<div class="page" id="page-connect" hidden>
+<section class="connect wrap" id="connect" aria-labelledby="connect-h">
+  <div class="sec-head"><h2 class="label" id="connect-h">Connect</h2><p class="sec-note">OpenAI-compatible. Any API key works; the endpoint is on this Mac only.</p></div>
+  <div class="connect-grid">
+    <dl class="facts conn-facts">
+      <div><dt>Base URL</dt><dd><code id="c-base">http://127.0.0.1:18080/v1</code> <button type="button" class="copy" data-copy-from="c-base">Copy</button></dd></div>
+      <div><dt>Model</dt><dd><code id="c-model">dsv41</code> <button type="button" class="copy" data-copy-from="c-model">Copy</button></dd></div>
+      <div><dt>API key</dt><dd><code>none</code> (send any string if a client insists)</dd></div>
+      <div><dt>Where</dt><dd id="c-where">The model endpoint answers on this Mac only, not on the home network.</dd></div>
+      <div><dt>Phone</dt><dd id="c-lan">–</dd></div>
+      <div><dt>Context</dt><dd id="c-context" class="num">–</dd></div>
+      <div><dt>Reply cap</dt><dd id="c-max" class="num">–</dd></div>
+    </dl>
+    <div class="snips">
+      <div class="tabs" role="tablist" aria-label="Client">
+        <button type="button" role="tab" class="tab" id="t-curl" aria-controls="p-curl" aria-selected="true">curl</button>
+        <button type="button" role="tab" class="tab" id="t-py" aria-controls="p-py" aria-selected="false" tabindex="-1">Python</button>
+        <button type="button" role="tab" class="tab" id="t-omp" aria-controls="p-omp" aria-selected="false" tabindex="-1">Chat apps</button>
+        <button type="button" role="tab" class="tab" id="t-env" aria-controls="p-env" aria-selected="false" tabindex="-1">Environment</button>
+      </div>
+      <p class="snip-note conn-rule">Send <code>max_tokens</code> with every request. Keep <code>temperature</code> at 0, or send <code>top_k</code> with any higher temperature: this build answers HTTP 500 to a sampled request without it.</p>
+      <div class="snip" role="tabpanel" id="p-curl" aria-labelledby="t-curl"><pre><code id="s-curl"></code></pre><button type="button" class="copy" data-copy-from="s-curl">Copy</button></div>
+      <div class="snip" role="tabpanel" id="p-py" aria-labelledby="t-py" hidden><pre><code id="s-py"></code></pre><button type="button" class="copy" data-copy-from="s-py">Copy</button></div>
+      <div class="snip" role="tabpanel" id="p-omp" aria-labelledby="t-omp" hidden><p class="snip-note">For a chat app on this Mac that takes an OpenAI-compatible server (Open WebUI, LibreChat, Msty, Chatbox and the like): enter these fields. The model id follows what serves.</p><pre><code id="s-omp"></code></pre><button type="button" class="copy" data-copy-from="s-omp">Copy</button></div>
+      <div class="snip" role="tabpanel" id="p-env" aria-labelledby="t-env" hidden><p class="snip-note">For tools that read the OpenAI variables.</p><pre><code id="s-env"></code></pre><button type="button" class="copy" data-copy-from="s-env">Copy</button></div>
+    </div>
+  </div>
+</section>
+</div>
+<div class="page" id="page-settings" hidden>
+<section class="settings wrap" id="settings" aria-labelledby="settings-h">
+  <div class="sec-head"><h2 class="label" id="settings-h">Settings</h2><p class="sec-note">This Mac's side of StrixFold UI.</p></div>
+  <div class="set-grid">
+  <dl class="facts set-facts">
+    <div><dt>Version</dt><dd><span id="ft-version"></span></dd></div>
+    <div><dt>Tunnels</dt><dd><span id="ft-tunnels">–</span> <button type="button" class="textbtn" id="tunnel-restart">Reconnect tunnels</button></dd></div>
+    <div><dt>Home network</dt><dd id="set-lan">–</dd></div>
+    <div><dt>Chats</dt><dd>Stored on this Mac only (~/Pictures/StrixFoldUI). Export one from its chat settings.</dd></div>
+    <div><dt>Logs</dt><dd><button type="button" class="textbtn" id="open-logs">Open the logs drawer</button></dd></div>
+  </dl>
+  </div>
+
+</section>
+</div>
+</main>
+</div>
+<!-- studio:viewer -->
+<aside class="viewer" id="viewer" hidden aria-labelledby="v-title" tabindex="-1">
+  <div class="v-head">
+    <h2 id="v-title"></h2>
+    <button type="button" class="icon-btn v-close" id="v-close" aria-label="Close the viewer">×</button>
+  </div>
+  <div class="v-body" id="v-body"></div>
+</aside>
+<aside class="tm" id="tm" hidden aria-labelledby="tm-title" tabindex="-1">
+  <div class="tm-head">
+    <button type="button" class="icon-btn tm-back" id="tm-back" aria-label="All agents" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6l-6 6 6 6"/></svg></button>
+    <h2 id="tm-title">Agents</h2>
+    <button type="button" class="icon-btn v-close" id="tm-close" aria-label="Close the agents panel">×</button>
+  </div>
+  <div class="tm-body" id="tm-body"></div>
+  <form class="tm-say" id="tm-say" hidden novalidate>
+    <label class="sr" for="tm-say-t">Write to the agent</label>
+    <textarea id="tm-say-t" rows="2" maxlength="4000" autocomplete="off"></textarea>
+    <button type="submit" class="t-send tm-say-go" id="tm-say-go" aria-label="Send to the agent"><svg class="t-send-up" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+  </form>
+</aside>
+<!-- /studio:viewer -->
+</div>
+
+<dialog class="chat-settings" id="chat-settings" aria-labelledby="cs-h">
+  <form method="dialog" id="cs-form" novalidate>
+    <div class="ed-head"><h2 id="cs-h">Chat settings</h2><button type="button" class="textbtn" id="cs-close">Close</button></div>
+    <label class="field wide"><span>Title</span><input id="cs-title" maxlength="200" autocomplete="off"></label>
+    <label class="field wide"><span>System prompt (optional)</span><textarea id="cs-system" rows="5" maxlength="20000"></textarea></label>
+    <div class="cs-row">
+      <label class="field"><span>Reply cap (max_tokens)</span><input id="cs-max" inputmode="numeric" placeholder="4096"></label>
+      <label class="field"><span>Temperature (0 = exact)</span><input id="cs-temp" inputmode="decimal" placeholder="0"></label>
+      <label class="field" id="cs-topk-wrap"><span>top_k (sent with any temperature above 0)</span><input id="cs-topk" inputmode="numeric" placeholder="40"></label>
+    </div>
+    <p class="err" id="cs-err" aria-live="assertive"></p>
+    <div class="submit"><button type="submit" id="cs-save">Save</button><a class="textbtn" id="cs-export" href="#" download>Export as Markdown</a><button type="button" class="textbtn danger" id="cs-delete">Delete chat</button></div>
+  </form>
+</dialog>
+<aside class="logs" id="logs" hidden aria-labelledby="logs-h">
+  <div class="logs-head">
+    <h2 id="logs-h">Logs</h2>
+    <div class="tabs" role="tablist" aria-label="Log">
+      <button type="button" role="tab" class="tab" data-log="events" aria-selected="true">Events</button>
+      <button type="button" role="tab" class="tab" data-log="0" aria-selected="false" tabindex="-1">Rank 0 · box1</button>
+      <button type="button" role="tab" class="tab" data-log="1" aria-selected="false" tabindex="-1">Rank 1 · box2</button>
+    </div>
+    <button type="button" class="textbtn" id="close-logs">Close</button>
+  </div>
+  <pre class="logs-body" id="logs-body" tabindex="0"></pre>
+</aside>
+
+<dialog class="editor" id="editor" aria-labelledby="ed-h">
+  <form method="dialog" id="ed-form" novalidate>
+    <div class="ed-head"><h2 id="ed-h">New profile</h2><button type="button" class="textbtn" id="ed-cancel">Close</button></div>
+    <p class="ed-base" id="ed-base"></p>
+    <div class="fields">
+      <label class="field wide"><span>Name</span><input id="ed-name" name="name" maxlength="60" autocomplete="off" required></label>
+      <label class="field"><span>Context (tokens)</span><select id="ed-context" name="context"></select><em class="err" data-err="context"></em></label>
+      <label class="field"><span>Default reply cap (max_tokens)</span><input id="ed-max" name="max_tokens" inputmode="numeric"><em class="err" data-err="max_tokens"></em></label>
+      <label class="field"><span>Prompt cache (GiB)</span><input id="ed-cache" name="prompt_cache_gib" inputmode="decimal"><em class="err" data-err="prompt_cache_gib"></em></label>
+      <label class="field"><span>Idle stop (minutes, 0 = never)</span><input id="ed-idle" name="idle_min" inputmode="numeric"><em class="err" data-err="idle_min"></em></label>
+      <label class="field"><span>Deploy</span><select id="ed-deploy" name="deploy"></select><em class="err" data-err="deploy"></em></label>
+      <label class="field"><span>Parallel requests (STREAMS, PARALLEL)</span><select id="ed-streams" name="streams"></select><em class="err" data-err="streams"></em><small class="ed-note" id="ed-streams-note"></small></label>
+      <div class="field checks"><span>Engine</span>
+        <label class="check"><input type="checkbox" id="ed-drafts" name="drafts"> <span>Drafts (DSpark)</span></label>
+        <label class="check"><input type="checkbox" id="ed-thinking" name="thinking"> <span>Thinking</span></label>
+      </div>
+      <label class="field"><span>Power</span><select id="ed-power" name="power"><option value="default">Default (balanced)</option><option value="max">Max speed (performance while it serves)</option></select><em class="err" data-err="power"></em><small class="ed-note" id="ed-power-note"></small></label>
+    </div>
+    <p class="ed-limits" id="ed-limits" aria-live="polite"></p>
+    <details class="adv" id="ed-adv">
+      <summary>Advanced: every serve.conf setting <span id="adv-count"></span></summary>
+      <p class="adv-intro">From <code id="adv-path"></code>. Each setting's help is the conf's own comment. A changed value is checked here and again when the profile starts. Leave a value as it is to keep the conf's.</p>
+      <label class="check adv-expert"><input type="checkbox" id="ed-expert"> <span>Expert: allow transport and lock settings. A wrong value can stop the ranks from linking.</span></label>
+      <div id="adv-body"></div>
+    </details>
+    <p class="err ed-general" id="ed-general" aria-live="assertive"></p>
+    <div class="submit"><button type="submit" id="ed-save">Save profile</button><button type="button" class="textbtn danger" id="ed-delete" hidden>Delete</button></div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<script src="/ui/motion.js" defer></script>
+<script src="/ui/app.js" defer></script>
+<script src="/ui/md.js" defer></script>
+<script src="/ui/chat.js" defer></script>
+<script src="/ui/studio.js" defer></script>
+<script src="/ui/halo-agents.js" defer></script>
+<script src="/ui/halo-chat.js" defer></script>
+</body>
+</html>

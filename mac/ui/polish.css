@@ -1,0 +1,279 @@
+/* StrixFold UI's look, loaded last: it restyles the shared pieces on the tokens in app.css (warm paper, quiet surfaces, soft
+   borders, one clay accent, 8-16 px corners, short eased motion) and changes no layout or wording. Delete this file and
+   its <link> to go back. */
+
+/* ---- ground, type, motion ---- */
+:root { --fill: var(--surface); }
+body { background: var(--paper); color: var(--ink); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+:where(a, button, [role="button"], summary, .go, .pill, .chip, input, select, textarea) {
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease), opacity var(--dur) var(--ease);
+}
+@media (prefers-reduced-motion: reduce) { :where(a, button, [role="button"], summary, .go, .pill, .chip, input, select, textarea) { transition: none; } }
+::selection { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 2px; }
+
+/* the greeting and page titles in the warm serif; the rest stays Inter Tight */
+.t-empty h1, .t-new h1, #page-talk .t-hero h1, .t-hello h1,
+.page > h1, .page > header h1, .ss-h h2, .s-head h1 {
+  font-family: var(--serif); font-weight: 400; letter-spacing: -.01em;
+}
+.t-hello h1 { font-size: clamp(30px, 4.2vw, 40px); }
+
+/* ---- the sidebar: a quiet surface, rounded rows, the current page filled ---- */
+.side { background: var(--surface); border-right-color: var(--faint); }
+.h-nav a, .side-pages a, .chat-list a { border-radius: var(--r-s); }
+.h-nav a:hover, .side-pages a:hover, .chat-list a:hover { background: var(--hover); }
+.h-nav a.on, .side-pages a.on, .chat-list a.on, .chat-list a[aria-current="page"] { background: var(--hover); font-weight: 500; }
+.h-new, .newchat { border-radius: var(--r-m); }
+.h-new:hover { background: color-mix(in srgb, var(--ink) 86%, var(--paper)); color: var(--paper); }
+.newchat { border-color: var(--faint); background: var(--raise); }
+.newchat:hover { background: var(--hover); color: inherit; }
+.newchat span { color: var(--accent); }
+
+/* ---- buttons, pills and chips: one family ---- */
+.go { border-radius: var(--r-s); border-color: var(--faint); background: var(--raise); color: var(--ink); }
+.go:hover { background: var(--hover); color: var(--ink); }
+.go.solid { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.go.solid:hover { background: color-mix(in srgb, var(--ink) 86%, var(--paper)); border-color: transparent; color: var(--paper); }
+.pill, .chip { border-radius: var(--r-s); }
+
+/* ---- fields ---- */
+:where(input[type="text"], input[type="search"], input[type="password"], input[type="email"], input[type="url"],
+       input[type="number"], select, textarea):not(.t-composer textarea) {
+  border-radius: var(--r-s); border-color: var(--faint); background: var(--raise);
+}
+
+/* ---- the composer: a raised card with a soft shadow; the clay send button ---- */
+.t-composer { background: var(--raise); border-color: var(--faint); border-radius: var(--r-l); box-shadow: var(--shadow); }
+.t-composer:focus-within { border-color: color-mix(in srgb, var(--ink) 28%, transparent); }
+.t-send:not(.stop) { background: var(--accent); color: var(--on-accent); border-radius: var(--r-s); }
+.t-send.stop { border-radius: var(--r-s); }
+
+
+/* ---- thin, quiet scrollbars ---- */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transparent; }
+
+/* ---- choices (Settings' rows): a soft tray, the chosen one raised ---- */
+.seg { gap: 2px; padding: 3px; border-radius: var(--r-m); background: var(--surface); border: 1px solid var(--faint);
+  justify-self: start; width: fit-content; max-width: 100%; }
+.seg button { border: 0; border-radius: var(--r-s); min-height: 32px; color: var(--muted); }
+.seg button:hover:not([disabled]) { border-color: transparent; background: var(--hover); color: var(--ink); }
+.seg button[aria-checked="true"], .seg button[aria-selected="true"] {
+  background: var(--raise); color: var(--ink); border-color: transparent; font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08), 0 0 0 1px var(--faint);
+}
+@media (max-width: 860px), (pointer: coarse) { .seg button { min-height: 40px; } }
+
+/* ---- page heads: a page title, not a poster; the rule under it quiet ---- */
+.s-head { border-bottom: 1px solid var(--faint); }
+.s-head h1 { font-size: clamp(26px, 3vw, 32px); line-height: 1.1; letter-spacing: -.01em; font-weight: 400; }
+#page-studio-settings .s-head h1 { font-size: 26px; }
+
+/* ---- the user's messages in a soft bubble, 16 px reading text, calm buttons and menus ---- */
+.t-user .bubble { background: var(--bubble); border-radius: 18px; padding: 10px 15px; font-size: 16px; }
+.t-asst .t-body { font-size: 16px; line-height: 1.6; }
+@media (max-width: 860px) { .t-asst .t-body, .t-user .bubble { font-size: 16px; } }
+.h-nav a.on, .side-pages a.on, .chat-list a.on, .chat-list a[aria-current="page"] { font-weight: 520; }
+.t-menu { background: var(--raise); border: 1px solid var(--faint); border-radius: var(--r-m); box-shadow: var(--shadow); padding: 6px; }
+.t-menu button, .t-menu a { border-radius: var(--r-s); }
+.chip, .t-chip, .pill { border-radius: 10px; }
+.go { border-radius: 10px; font-weight: 520; }
+
+/* ---- the open chat in Recents: a quiet fill, no red bar ---- */
+.chat-item:hover, .chat-item.on { background: var(--hover); border-radius: var(--r-s); }
+.chat-item.on::before { display: none; }
+.chat-item.on a { font-weight: 520; }
+/* ---- the cursor while it writes: the ink, quieter; round icon buttons without a ring ---- */
+.caret { background: color-mix(in srgb, var(--ink) 55%, transparent); border-radius: 1px; width: 7px; }
+.h-round { border-color: transparent; }
+.h-round:hover, .h-round[aria-expanded="true"] { border-color: transparent; background: var(--hover); }
+/* ---- code and tables in answers: the page's own quiet surface in both themes, not a black slab ---- */
+.md-code { background: var(--surface); color: var(--ink); border: 1px solid var(--faint); border-radius: var(--r-m); }
+:root[data-theme="dark"] .md-code { outline: 0; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .md-code { outline: 0; } }
+.md-code-bar { border-bottom-color: var(--faint); color: var(--muted); }
+.md-copy { border-color: var(--faint); color: var(--ink); border-radius: var(--r-s); }
+.md-copy:hover { border-color: var(--faint); background: var(--hover); }
+.md-code pre {
+  scrollbar-color: color-mix(in srgb, var(--ink) 30%, transparent) transparent;
+  background:
+    linear-gradient(to right, var(--surface) 30%, transparent) left center / 40px 100% no-repeat local,
+    linear-gradient(to left, var(--surface) 30%, transparent) right center / 40px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--ink) 16%, transparent), transparent) left center / 14px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--ink) 16%, transparent), transparent) right center / 14px 100% no-repeat scroll;
+  background-color: var(--surface);
+}
+.md-table th { border-bottom-color: var(--faint); font-weight: 560; }
+.md-q { border-left-color: var(--faint); }
+.md-code pre::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--ink) 30%, transparent); }
+
+/* ---- the sidebar: New session and Search as the first rows, 15 px rows with soft icons, Recents in a small label, an
+   account row at the foot ---- */
+body { font-size: 15px; line-height: 1.5; }
+:root { --serif: ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif; }
+.h-side { gap: 1px; padding-top: 2px; }
+.h-new, .h-row, .h-nav a { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 0; padding: 8px 10px; border: 0;
+  border-radius: 10px; background: none; color: var(--ink); font: inherit; font-size: 15px; text-align: left; box-shadow: none; cursor: pointer; }
+.h-new { gap: 10px; padding: 8px; font-weight: 520; height: auto; }
+.h-new:hover, .h-row:hover, .h-nav a:hover { background: var(--hover); color: var(--ink); }
+.h-new-ic { width: 26px; height: 26px; flex: none; border-radius: 50%; background: var(--hover); color: var(--ink);
+  display: inline-flex; align-items: center; justify-content: center; }
+.h-new .h-new-ic svg { width: 15px; height: 15px; stroke-width: 2.2; }
+.h-row svg, .h-nav a svg { width: 18px; height: 18px; flex: none; color: var(--muted); stroke-width: 1.7; }
+.h-nav { gap: 1px; margin-top: 0; }
+.h-nav a.on { background: var(--hover); font-weight: 520; }
+.h-search-btn { position: static; width: 100%; height: auto; border-radius: 10px; }
+body:not(.studio-only) .h-search-btn { top: auto; }
+.h-search { margin: 2px 0 4px; }
+.h-recents-head { padding: 18px 10px 6px; }
+.h-label { font-size: 12px; font-weight: 520; color: var(--muted); }
+.h-foot { margin-top: 8px; padding: 12px 0 2px; border-top: 1px solid var(--faint); }
+.h-account { width: 100%; height: auto; border: 0; border-radius: 10px; background: none; display: flex; align-items: center;
+  justify-content: flex-start; gap: 10px; padding: 8px; color: var(--ink); }
+.h-account:hover { background: var(--hover); border-color: transparent; }
+.h-ini { width: 32px; height: 32px; flex: none; border-radius: 50%; background: var(--ink); color: var(--paper);
+  display: inline-flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; }
+.h-account .h-t { font-weight: 560; font-size: 14px; }
+@media (max-width: 860px), (pointer: coarse) { .h-new, .h-row, .h-nav a { min-height: 44px; } }
+
+/* ---- the composer's controls: 34 px chips and icon buttons with 10 px corners ---- */
+.t-composer { border-radius: 20px; padding: 14px 12px 10px 16px; }
+.t-round, .t-send { width: 34px; height: 34px; border-radius: 10px; }
+.t-round { border-color: var(--faint); }
+.t-round:hover { border-color: var(--faint); background: var(--hover); }
+.t-round svg, .t-send svg { width: 18px; height: 18px; }
+.t-perm, .t-model, .t-ctx { min-height: 34px; height: 34px; border-radius: 10px; font-size: 13.5px; }
+.t-perm:hover, .t-perm[aria-expanded="true"], .t-model:hover, .t-ctx:hover { border-color: var(--faint); background: var(--hover); }
+@media (max-width: 860px), (pointer: coarse) { .t-round, .t-send, .t-perm, .t-model, .t-ctx { min-height: 40px; height: 40px; } .t-round, .t-send { width: 40px; } }
+/* Recents: compact text rows, no icons */
+.h-recents .h-item a { min-height: 0; gap: 0; padding: 7px 4px 7px 10px; font-size: 14px; }
+.h-recents .h-item .h-ico { display: none; }
+@media (max-width: 860px), (pointer: coarse) { .h-recents .h-item a { min-height: 40px; } }
+.t-more { background: none; }
+.t-more:hover, .t-more[aria-expanded="true"] { background: var(--hover); }
+
+/* ---- the context tracker: a ring in the context chip (halo-chat.js syncRing) ---- */
+:is(#t-ctx, #t-ctx-top) .t-ring { width: 16px; height: 16px; flex: none; margin-right: 6px; transform: rotate(-90deg); }
+:is(#t-ctx, #t-ctx-top) .t-ring circle { fill: none; stroke-width: 2.6; }
+:is(#t-ctx, #t-ctx-top) .t-ring-bg { stroke: var(--faint); }
+:is(#t-ctx, #t-ctx-top) .t-ring-fg { stroke: var(--muted); stroke-linecap: round; transition: stroke-dasharray var(--dur) var(--ease), stroke var(--dur) var(--ease); }
+:is(#t-ctx, #t-ctx-top) .t-ring.warm .t-ring-fg { stroke: color-mix(in srgb, var(--accent) 55%, var(--muted)); }
+:is(#t-ctx, #t-ctx-top) .t-ring.full .t-ring-fg { stroke: var(--accent); }
+:is(#t-ctx, #t-ctx-top) .t-ring.over .t-ring-fg { stroke: var(--signal); }
+/* 90% full: a slim warning above the composer (halo-chat.js syncRing) */
+.t-ctxwarn { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; padding: 8px 10px 8px 12px; border-radius: var(--r-m);
+  background: color-mix(in srgb, var(--signal) 9%, var(--raise)); border: 1px solid color-mix(in srgb, var(--signal) 32%, transparent);
+  color: var(--ink); font-size: 13.5px; line-height: 1.35; }
+.t-ctxwarn svg { width: 16px; height: 16px; flex: none; fill: none; stroke: var(--signal); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+.t-ctxwarn span { flex: 1; min-width: 0; }
+.t-ctxwarn-go { flex: none; height: 30px; padding: 0 12px; border-radius: var(--r-s); border: 1px solid var(--faint); background: var(--raise);
+  color: var(--ink); font: inherit; font-size: 13px; font-weight: 520; cursor: pointer; }
+.t-ctxwarn-go:hover { background: var(--hover); }
+
+/* ---- a phone's sidebar foot: the avatar and a "+ New session" pill float over the list's end,
+   which fades out under them; the top row's New session gives way to it (the desktop sidebar keeps its own rows) ---- */
+.h-pill { display: none; }
+@media (max-width: 860px) {
+  #s-new { display: none; }
+  .h-recents { padding-bottom: 56px; }
+  .h-foot { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    margin-top: -64px; padding: 28px 2px 4px; border-top: 0;
+    background: linear-gradient(to bottom, color-mix(in srgb, var(--surface) 0%, transparent), var(--surface) 46%); }
+  .h-foot .h-account { width: auto; padding: 0; border-radius: 50%; background: none; }
+  .h-foot .h-account .h-t { display: none; }
+  .h-foot .h-ini { width: 48px; height: 48px; border: 1px solid var(--faint); background: var(--raise); color: var(--ink);
+    font-size: 17px; font-weight: 560; box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 8%, transparent) inset; }
+  .h-pill { display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 22px 0 18px; border: 0; border-radius: 999px;
+    background: var(--ink); color: var(--paper); font: inherit; font-size: 17px; font-weight: 520; cursor: pointer;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .22); }
+  .h-pill svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .h-pill:active { transform: scale(.97); }
+  .h-pill:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+}
+
+/* ---- the proportions and the colors: a neutral light palette and the system font, a 288 px sidebar of 32 px rows, a
+   736 px reading column, a 768 px composer and a 320 px side panel. Dark: the page #191919, the sidebar and the composer
+   #1f1f1f, words 93% and 57% white, the open row 15% white, rings 8-10%, the bubble 5% white. Red is a text red there,
+   since red here is mostly words: a #dc3c3d fill is 4:1 on the page. ---- */
+:root {
+  --paper: #ffffff; --surface: #fafafa; --raise: #ffffff; --ink: #1a1a1a; --muted: #666666; --bubble: #f3f3f3;
+  --faint: rgba(0, 0, 0, .08); --hover: rgba(0, 0, 0, .05); --sel: rgba(0, 0, 0, .1); --divider: rgba(0, 0, 0, .1);
+  --ring: rgba(0, 0, 0, .12); --focus: #2370cd; --accent: #1a1a1a; --on-accent: #ffffff; --signal: #c83839;
+  --shadow: 0 4px 20px rgba(0, 0, 0, .075); --r-s: 8px;
+  --font: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --serif: var(--font);
+  --side-w: 288px; --thread-w: 776px; --tm-w: 320px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #191919; --surface: #1f1f1f; --raise: #1f1f1f; --ink: #efefef; --muted: #9c9c9c; --bubble: #252525;
+    --faint: rgba(255, 255, 255, .04); --hover: rgba(255, 255, 255, .075); --sel: rgba(255, 255, 255, .15);
+    --divider: rgba(255, 255, 255, .1); --ring: rgba(255, 255, 255, .08); --accent: #efefef; --on-accent: #191919;
+    --signal: #fa8080; --on-signal: #191919; --shadow: 0 4px 20px rgba(0, 0, 0, .075); --fill: var(--surface);
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #191919; --surface: #1f1f1f; --raise: #1f1f1f; --ink: #efefef; --muted: #9c9c9c; --bubble: #252525;
+  --faint: rgba(255, 255, 255, .04); --hover: rgba(255, 255, 255, .075); --sel: rgba(255, 255, 255, .15);
+  --divider: rgba(255, 255, 255, .1); --ring: rgba(255, 255, 255, .08); --accent: #efefef; --on-accent: #191919;
+  --signal: #fa8080; --on-signal: #191919; --shadow: 0 4px 20px rgba(0, 0, 0, .075); --fill: var(--surface);
+}
+/* menus and popovers are a dark grey, a step above the page and the composer (light: white like the rest) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) :is(
+    .t-menu, .h-menu, .model-menu) { background: #303030; }
+}
+:root[data-theme="dark"] :is(
+  .t-menu, .h-menu, .model-menu) { background: #303030; }
+:focus-visible { outline: 2px solid var(--focus); }
+.side { border-right-color: var(--divider); }
+.tm { border-left-color: var(--divider); }
+.h-nav a.on, .side-pages a.on, .chat-list a.on, .chat-item.on { background: var(--sel); }
+.chat-item.on a, .h-recents .h-item.on a { font-weight: 400; }
+/* a row with a ⋯ is one pill: the row paints the hover and the selection, its link none of its own (the open chat's link
+   laid --hover over the row's --sel, the ⋯ beside it didn't) */
+.chat-list .chat-item a, .chat-list .chat-item a:hover, .chat-list .chat-item a[aria-current="page"] { background: none; }
+.t-user .bubble { background: var(--bubble); border-radius: 12px; padding: 12px 16px; }
+.t-composer-wrap { max-width: calc(768px + 2 * var(--gutter)); }
+.t-composer { background: var(--raise); border-color: var(--ring); border-radius: 14px; box-shadow: var(--shadow); }
+.t-composer:focus-within { border-color: var(--ring); }
+@media (min-width: 861px) and (pointer: fine) {
+  .side { padding: 0 8px 8px; }
+  .side-top { min-height: 45px; padding: 0 6px 0 10px; }
+  .brand { font-size: 20px; font-weight: 500; letter-spacing: -.01em; }
+  .h-side, .h-nav { gap: 2px; }
+  .h-new, .h-row, .h-nav a { min-height: 32px; padding: 0 10px; gap: 10px; border-radius: 8px; font-size: 14px;
+    line-height: 21px; font-weight: 435; }
+  .h-new-ic { width: 16px; height: 16px; background: none; }
+  .h-new .h-new-ic svg, .h-row svg, .h-nav a svg { width: 16px; height: 16px; }
+  .h-nav a.on { font-weight: 435; }
+  .h-recents-head { padding: 20px 10px 6px; }
+  .h-recents .h-item + .h-item { margin-top: 2px; }
+  .h-recents .h-more { width: 32px; height: 32px; border-radius: 8px; }
+  .h-more-ic { width: 16px; height: 16px; }
+  .h-recents .h-item a { min-height: 32px; display: flex; align-items: center; padding: 0 4px 0 10px; font-size: 14px;
+    line-height: 21px; }
+  .h-foot { border-top: 0; padding: 8px 0 0; }
+  .h-ini { width: 24px; height: 24px; font-size: 12px; }
+  .h-account .h-t { font-weight: 435; }
+  .topbar { min-height: 45px; padding-top: 0; padding-bottom: 0; border-bottom-color: transparent; }
+  .chip-model, body.studio-only:has(#page-talk:not([hidden])) .topbar .chip-model { font-size: 14px; font-weight: 435; }
+  .t-asst .t-body { font-size: 15px; line-height: 21px; }
+  .t-user .bubble { font-size: 15px; line-height: 21px; }
+  .t-composer textarea { font-size: 14px; line-height: 20px; }
+}
+
+/* the sidebar's edge, dragged to set its width (side-collapse.js): a mouse's or trackpad's only, never on a phone's drawer
+   or while the sidebar is folded away */
+.side-resize { display: none; }
+@media (min-width: 861px) and (pointer: fine) {
+  .side-resize { display: block; position: fixed; top: 0; bottom: 0; left: calc(var(--side-w) - 4px); width: 8px; z-index: 30;
+    cursor: col-resize; touch-action: none; }
+  .side-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent;
+    transition: background .12s; }
+  .side-resize:hover::after, .side-resize:focus-visible::after, html.side-resizing .side-resize::after { background: var(--ring, var(--faint)); }
+  .side-resize:focus-visible { outline: none; }
+  html.side-collapsed .side-resize { display: none; }
+  html.side-resizing, html.side-resizing * { cursor: col-resize !important; user-select: none; }
+}

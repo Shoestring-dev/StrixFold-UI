@@ -1,0 +1,8 @@
+#!/bin/bash
+# Forced-command gate for the dashboard's key (halo-dsh): only these, everything else is refused (rc 64).
+#   chat-tools <chat id> box|web   one Chat tool call
+#   chat-health                the chat tools' check
+c=${SSH_ORIGINAL_COMMAND:-}
+if [[ "$c" =~ ^chat-tools\ ([a-f0-9]{16})\ (box|web)$ ]]; then exec /opt/halo-tools/bin/chat-tools "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"; fi
+if [ "$c" = "chat-health" ]; then exec /opt/halo-tools/bin/chat-health; fi
+echo "dsh-gate: refused" >&2; exit 64

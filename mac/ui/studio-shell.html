@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="halo-ui-token" content="__HALO_STUDIO_TOKEN__">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="StrixFold UI">
+<link rel="manifest" href="/ui/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/ui/apple-touch-icon.png">
+<title>StrixFold UI</title>
+<script src="/ui/theme.js"></script>
+<script src="/ui/side-collapse.js"></script>
+<link rel="preload" href="/ui/fonts/InterTight-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/ui/app.css">
+<link rel="stylesheet" href="/ui/chat.css">
+<link rel="stylesheet" href="/ui/studio.css">
+<link rel="stylesheet" href="/ui/halo-chat.css">
+<link rel="icon" href="/ui/icon-192.png" type="image/png">
+<link rel="stylesheet" href="/ui/polish.css">
+</head>
+<!-- StrixFold UI alone, as the tailnet sees it (`tailscale serve`): none of the dashboard's own pages, and no dashboard token.
+     The blocks below are the same markup as in index.html (marked studio:...). -->
+<body class="studio-only">
+<a class="skip" href="#main">Skip to content</a>
+<div class="app" id="app">
+<aside class="side" id="side" aria-label="Chats and pages">
+  <div class="side-top">
+    <a class="brand" href="#/talk" aria-label="StrixFold UI, new chat"><img class="mark" src="/ui/icon-192.png" alt="" width="24" height="24"><span>StrixFold UI</span></a>
+    <button type="button" class="side-collapse" id="side-collapse" aria-label="Collapse sidebar" aria-controls="side" aria-expanded="true" title="Collapse sidebar (⌘\)"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9.5 4.5v15"/></svg></button>
+    <button type="button" class="icon-btn side-close" id="side-close" aria-label="Close menu">×</button>
+  </div>
+__STUDIO_SIDE__
+</aside>
+<div class="scrim" id="scrim" hidden></div>
+<div class="main-col">
+<header class="topbar">
+  <button type="button" class="side-show" id="side-show" aria-label="Show sidebar" aria-controls="side" aria-expanded="true" title="Show sidebar (⌘\)"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9.5 4.5v15"/></svg></button>
+  <button type="button" class="icon-btn menu" id="open-side" aria-label="Open menu" aria-controls="side" aria-expanded="false"><i></i><i></i><i></i></button>
+  <p class="chip" id="status-chip"><span class="chip-dot" id="chip-dot"></span><span class="chip-model" id="hd-model">StrixFold UI</span><span class="chip-state" id="chip-state"></span></p>
+  <button type="button" class="t-ctx-top" id="t-ctx-top" aria-haspopup="dialog" aria-controls="t-sheet" hidden><svg class="t-ring" id="t-ring-top" viewBox="0 0 20 20" aria-hidden="true"><circle class="t-ring-bg" cx="10" cy="10" r="7.5"/><circle class="t-ring-fg" id="t-ring-top-fg" cx="10" cy="10" r="7.5"/></svg><span id="t-ctx-top-pct"></span></button>
+</header>
+<main id="main">
+__STUDIO_PAGES__
+</main>
+</div>
+__STUDIO_VIEWER__
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<script src="/ui/md.js" defer></script>
+<script src="/ui/motion.js" defer></script>
+<script src="/ui/studio-shell.js" defer></script>
+<script src="/ui/studio.js" defer></script>
+<script src="/ui/halo-agents.js" defer></script>
+<script src="/ui/halo-chat.js" defer></script>
+</body>
+</html>

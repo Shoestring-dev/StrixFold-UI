@@ -1,0 +1,43 @@
+;; web_read's fetcher (fetch_child.py: one GET through the egress guard) under sandbox-exec. Deny by default.
+;; Security baseline item 2: the process that talks to the web is not the one that runs anything and not the one that
+;; parses; this child runs no other program (no fork, no exec but its own Python), reads only the Python runtime, its
+;; own package (agents_web), system libraries and the CA store, writes nothing, and connects out only on tcp 80 and 443
+;; (never loopback) plus the system DNS resolver's socket. Seatbelt cannot single out LAN, tailnet or this Mac's other
+;; addresses on 80/443: the guard inside it refuses those (one wall there; pf or a broker is phase 2).
+;; It cannot read ~/.ssh, the private store (~/Pictures/StrixFoldUI), StrixFold UI or anything else of the user's.
+;; fetcher.SandboxedGuard fills the params, the @ANCESTORS@ line (stat only) and, on a --fake guard only, the test
+;; routes' local ports (@TESTROUTES@); the live app's profile has none.
+(version 1)
+(deny default)
+
+(allow process-exec (literal (param "PYTHON")))
+
+(allow file-read*
+  (subpath (param "RUNTIME"))
+  (subpath (param "PKG"))
+  (subpath "/usr/lib")
+  (subpath "/usr/share/locale")
+  (subpath "/System/Library")
+  (subpath "/System/Cryptexes")
+  (subpath "/private/var/db/dyld")
+  (subpath "/private/var/db/timezone")
+  (subpath "/private/etc/ssl")
+  (literal "/private/etc/hosts")
+  (literal "/"))
+
+(allow file-read-metadata
+  (literal "/private")
+  (literal "/var")
+  (literal "/etc")
+  (literal "/tmp")
+  (literal "/private/etc/localtime")
+  @ANCESTORS@)
+
+(allow file-read* file-write-data (literal "/dev/null"))
+(allow file-read* (literal "/dev/urandom") (literal "/dev/random"))
+(allow sysctl-read)
+
+(allow network-outbound (remote tcp4 "*:80") (remote tcp4 "*:443"))  ; IPv4 only: with "tcp", the localhost deny below matched nothing (probe)
+(deny network-outbound (remote ip "localhost:*"))
+(allow network-outbound (literal "/private/var/run/mDNSResponder"))
+@TESTROUTES@

@@ -1,0 +1,622 @@
+#!/usr/bin/python3 -I
+"""chat-tools <chat id> box|web: one Chat tool call from the Mac, in Toolbox's
+halo-tools distro as `agent`, reached only through the dashboard key's forced command (dsh-gate). Python standard
+library only.
+
+The Mac writes one request line on stdin, then (web mode) proxy frames; chat-tools writes newline-delimited JSON on
+stdout: {"t": "out", "text"} while a command runs, {"t": "popen"|"pdata"|"pclose", "sid", "b64"} for the proxy, and
+exactly one {"t": "result", ...} last. When stdin closes (Stop, the Mac gave up) the call is killed.
+
+Every call runs in a fresh bubblewrap sandbox (bwrap_argv): the chat's folder as /work and nothing else of /home/agent,
+/usr and a few /etc files read-only, its own empty network namespace (only lo), a 1 GiB /tmp, no new privileges, killed
+with chat-tools. web mode binds one Unix socket in; chat-run listens on the sandbox's own 127.0.0.1:3128 and passes each
+connection through it; chat-tools carries the bytes to the Mac, which runs them through its filtering proxy.
+
+Limits: a command 120 s by default, 600 s at most; output kept to 200 KB; the chat's folder 5 GB, measured every 2 s
+while a command runs (killed past it); all chats together live on their own 100 GB filesystem (a sparse image the
+install mounts on /home/agent/chats), so a runaway write stops there and never grows the machine's own disk; no call
+runs unless that filesystem is mounted, and none that writes starts with under 6 GB free on it; a folder not used for
+30 days is removed at the next call.
+
+A Private chat's call carries "seal": {"wk", "ver"} in its request line: its folder is one sealed file,
+<root>/<id>.sealed, opened only inside the call's sandbox into /work (a 2 GB tmpfs that goes with the sandbox) and
+sealed again by chat-run; chat-tools moves the new file into place. The key is never written or logged here. Stop, the
+time limit and the output cap stop the command and the folder is still sealed (a backstop kills the call if sealing
+hangs). A chat is either sealed or not: a sealed call is refused for a chat with a plain folder, and the other way
+round.
+
+  chat-tools --health        one JSON line: {"bwrap", "python", "chats", "total_gb"}
+"""
+import base64
+import codecs
+import errno
+import fcntl
+import json
+import os
+import re
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+ROOT = os.environ.get("CHAT_TOOLS_ROOT") or "/home/agent/chats"
+SANDBOX = os.environ.get("CHAT_TOOLS_SANDBOX") or "bwrap"  # "none": tests on a Mac only (no isolation at all)
+HERE = os.path.dirname(os.path.realpath(__file__))
+RUN = os.path.join(HERE, "chat-run")
+NODE = "/opt/halo-tools/node"
+ID_RE = re.compile(r"^[a-f0-9]{16}$")
+CHAT_CAP, TOTAL_CAP = 5 << 30, 100 << 30
+FLOOR = 6 << 30          # free space on the chats filesystem a writing call needs to start
+MARKER = ".halo-chats-fs" # a root-owned file the install puts at the chats filesystem's root
+NOT_MOUNTED = "Toolbox's chats disk isn't mounted, so the container is off"
+DISK_WORDS = {errno.ENOSPC: "Toolbox's chats disk is full", errno.EDQUOT: "Toolbox's chats disk is full",
+              errno.EIO: "Toolbox's disk gave an I/O error (it may be full)", errno.EROFS: "Toolbox's chats disk is read-only"}
+DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S, OP_TIMEOUT_S = 120, 600, 60
+OUT_CAP = 200_000
+LINE_MAX = 40 << 20      # the request line (a put of 25 MB in base64)
+WATCH_S = 2.0
+MAX_ENTRIES = 200_000
+IDLE_S = 30 * 86400
+TMP_SIZE = 1 << 30
+SEALED_WORK = 2 << 30    # a Private chat's /work (tmpfs), so also the most its sealed file holds
+SEAL_GRACE_S = 120       # after a stop, how long sealing may take before the call is killed (the folder stays as it was)
+MAX_STREAMS = 32
+ETC = ("passwd", "group", "nsswitch.conf", "localtime", "ld.so.cache", "alternatives", "ssl", "ca-certificates", "mime.types")
+
+_out_mu = threading.Lock()
+
+
+def emit(obj):
+    with _out_mu:
+        sys.stdout.write(json.dumps(obj) + "\n")
+        sys.stdout.flush()
+
+
+def bwrap_argv(chat_dir, sock=None, etc=ETC, node=NODE, exists=os.path.exists, sealed=None):
+    """The sandbox for one call: only `chat_dir` (as /work), read-only /usr and a few /etc files, Node, chat-run; its
+    own network namespace (only lo), pid, ipc, uts and cgroup namespaces; a size-capped /tmp; gone with chat-tools.
+    `sock`: the web mode's Unix socket, bound at /run/proxy.sock (nothing else under /run).
+    `sealed` (a Private chat): (sealed file or None, out file, status file); /work is then a 2 GB tmpfs of this sandbox
+    only, the sealed file is bound read-only at /run/sealed.in, the two others writable at /run/sealed.out and
+    /run/seal.json."""
+    a = ["bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--clearenv",
+         "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin", "/bin", "--symlink", "usr/lib", "/lib",
+         "--symlink", "usr/lib64", "/lib64", "--symlink", "usr/sbin", "/sbin"]
+    for e in etc:
+        if exists(f"/etc/{e}"):
+            a += ["--ro-bind", f"/etc/{e}", f"/etc/{e}"]
+    if node and exists(node):
+        a += ["--ro-bind", node, "/opt/node"]
+    a += ["--proc", "/proc", "--dev", "/dev", "--size", str(TMP_SIZE), "--tmpfs", "/tmp", "--ro-bind", RUN, "/run/chat-run"]
+    if sealed:
+        blob, out, status = sealed
+        a += ["--size", str(SEALED_WORK), "--tmpfs", "/work"]
+        if blob:
+            a += ["--ro-bind", blob, "/run/sealed.in"]
+        a += ["--bind", out, "/run/sealed.out", "--bind", status, "/run/seal.json"]
+    else:
+        a += ["--bind", chat_dir, "/work"]
+    a += ["--chdir", "/work", "--setenv", "HOME", "/work", "--setenv", "PATH", "/usr/bin:/bin"]
+    if sock:
+        a += ["--bind", sock, "/run/proxy.sock"]
+    return a + ["--", "/usr/bin/python3", "-I", "/run/chat-run"]
+
+
+def inner(chat_dir, args, sock=None, sealed=None):
+    """(argv, env) for chat-run with `args`: in the sandbox, or (tests, SANDBOX=none) straight on the folder (a sealed
+    call's: a fresh temp folder chat-tools removes)."""
+    if SANDBOX == "none":
+        env = {"PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin", "CHAT_RUN_WORK": chat_dir, "LANG": "C.UTF-8"}
+        # the eval harness's PATH for the commands, whose python3 is the real interpreter (/usr/bin/python3's xcrun stub prints
+        # a page of warnings under the deny-default sandbox, which a command on Toolbox never sees)
+        if os.environ.get("CHAT_TOOLS_TEST_PATH"):
+            env["CHAT_RUN_PATH"] = os.environ["CHAT_TOOLS_TEST_PATH"]
+        if sock:
+            env["CHAT_RUN_PROXY"] = sock
+        if sealed:
+            env.update(CHAT_RUN_SEALED_IN=sealed[0] or os.path.join(chat_dir, ".no-sealed-file"), CHAT_RUN_SEALED_OUT=sealed[1],
+                       CHAT_RUN_SEAL_STATUS=sealed[2])
+        return [sys.executable, "-I", RUN] + args, env
+    return bwrap_argv(chat_dir, sock, sealed=sealed) + args, {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
+
+
+def usage(path, cap=MAX_ENTRIES):
+    """(bytes on disk, entries) of a folder, by st_blocks (sparse and hard-linked files at their real size), links not
+    followed; entries past `cap` stop the count (the caller treats that as over)."""
+    total, n, stack = 0, 0, [path]
+    while stack:
+        d = stack.pop()
+        try:
+            it = os.scandir(d)
+        except OSError:
+            continue
+        with it:
+            for e in it:
+                n += 1
+                if n > cap:
+                    return total, n
+                try:
+                    st = e.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                total += st.st_blocks * 512
+                if e.is_dir(follow_symlinks=False):
+                    stack.append(e.path)
+    return total, n
+
+
+def chats():
+    """Every chat with something here: a folder, or a Private chat's sealed file."""
+    try:
+        names = os.listdir(ROOT)
+    except OSError:
+        return []
+    return sorted({n[:16] for n in names if ID_RE.match(n) or (n.endswith(".sealed") and ID_RE.match(n[:-7]))})
+
+
+def sealed_path(cid):
+    return os.path.join(ROOT, f"{cid}.sealed")
+
+
+def remove_chat(cid):
+    shutil.rmtree(os.path.join(ROOT, cid), ignore_errors=True)
+    for p in (sealed_path(cid), os.path.join(META, f"{cid}.json")):
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+
+
+META = os.path.join(ROOT, ".meta")  # per chat: when it was last used and its size (kept out of /work)
+
+
+def meta(cid):
+    try:
+        with open(os.path.join(META, f"{cid}.json")) as f:
+            m = json.load(f)
+        return m if isinstance(m, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def set_meta(cid, **kw):
+    os.makedirs(META, mode=0o700, exist_ok=True)
+    m = dict(meta(cid), **kw)
+    tmp = os.path.join(META, f".{cid}.{os.getpid()}")
+    with open(tmp, "w") as f:
+        json.dump(m, f)
+    os.replace(tmp, os.path.join(META, f"{cid}.json"))
+
+
+def recorded(cid):
+    try:
+        return int(meta(cid).get("bytes") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def sweep(now=None):
+    """Remove chat folders not used for 30 days."""
+    now = now or time.time()
+    for cid in chats():
+        d = os.path.join(ROOT, cid)
+        try:
+            last = float(meta(cid).get("last") or os.path.getmtime(d if os.path.isdir(d) else sealed_path(cid)))
+        except (OSError, TypeError, ValueError):
+            continue
+        if now - last > IDLE_S:
+            remove_chat(cid)
+
+
+def killpg(p):
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(p.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            return
+        try:
+            p.wait(2)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+# ---------------------------------------------------------------- one call
+class Call:
+    def __init__(self, cid, mode, req):
+        self.cid, self.mode, self.req = cid, mode, req
+        self.dir = os.path.join(ROOT, cid)
+        self.killed, self.p, self.streams, self.sid = None, None, {}, 0
+        self.smu = threading.Lock()
+
+    def result(self, **kw):
+        emit(dict({"t": "result"}, **kw))
+
+    def kill(self, why):
+        if self.killed is None:
+            self.killed = why
+        if self.p is not None and self.p.poll() is None:
+            if getattr(self, "soft", False):  # a sealed command: chat-run stops it and seals the folder; a backstop after
+                self.soft = False
+                try:
+                    self.p.stdin.write((json.dumps({"stop": why}) + "\n").encode())
+                    self.p.stdin.flush()
+                except (OSError, ValueError):
+                    pass
+                t = threading.Timer(SEAL_GRACE_S, lambda: self.p.poll() is None and killpg(self.p))
+                t.daemon = True
+                t.start()
+                return
+            killpg(self.p)
+
+    # -- stdin: EOF stops the call; web mode's frames go to their streams
+    def read_stdin(self):
+        for line in sys.stdin:
+            try:
+                f = json.loads(line)
+            except ValueError:
+                continue
+            with self.smu:
+                s = self.streams.get(f.get("sid"))
+            if s is None:
+                continue
+            try:
+                if f.get("t") == "pdata":
+                    s.sendall(base64.b64decode(f.get("b64") or ""))
+                elif f.get("t") == "pclose":
+                    s.shutdown(socket.SHUT_WR)
+            except (OSError, ValueError):
+                pass
+        self.kill("stop")
+        with self.smu:
+            for s in self.streams.values():
+                try:
+                    s.close()
+                except OSError:
+                    pass
+
+    # -- web mode: the Unix socket the sandbox's proxy shim reaches
+    def proxy_accept(self, srv):
+        while True:
+            try:
+                c, _ = srv.accept()
+            except OSError:
+                return
+            with self.smu:
+                if len(self.streams) >= MAX_STREAMS:
+                    c.close()
+                    continue
+                self.sid += 1
+                sid = self.sid
+                self.streams[sid] = c
+            emit({"t": "popen", "sid": sid})
+            threading.Thread(target=self.proxy_up, args=(sid, c), daemon=True).start()
+
+    def proxy_up(self, sid, c):
+        try:
+            while True:
+                d = c.recv(65536)
+                if not d:
+                    break
+                emit({"t": "pdata", "sid": sid, "b64": base64.b64encode(d).decode()})
+        except OSError:
+            pass
+        emit({"t": "pclose", "sid": sid})
+        with self.smu:
+            self.streams.pop(sid, None)
+
+    def watch_disk(self):
+        while self.p is not None and self.p.poll() is None:
+            time.sleep(WATCH_S)
+            used, n = usage(self.dir)
+            if used > CHAT_CAP or n > MAX_ENTRIES:
+                self.kill("disk")
+                return
+
+    def run(self):
+        cmd = str(self.req.get("command") or "")
+        if not cmd.strip() or len(cmd) > 100_000:
+            return self.result(ok=False, refused="command: 1 to 100,000 characters")
+        timeout = max(1, min(MAX_TIMEOUT_S, int(self.req.get("timeout_s") or DEFAULT_TIMEOUT_S)))
+        sock = srv = sd = None
+        if self.mode == "web":  # a private folder for the socket (0700; a short path: Unix sockets take about 100 bytes)
+            sd = tempfile.mkdtemp(prefix="halo-chat-", dir="/tmp")
+            sock = os.path.join(sd, "p.sock")
+            srv = socket.socket(socket.AF_UNIX)
+            srv.bind(sock)
+            os.chmod(sock, 0o600)
+            srv.listen(MAX_STREAMS)
+            threading.Thread(target=self.proxy_accept, args=(srv,), daemon=True).start()
+        argv, env = inner(self.dir, ["exec", self.mode], sock)
+        t0, out_n, dec = time.time(), 0, codecs.getincrementaldecoder("utf-8")("replace")
+        try:
+            self.p = subprocess.Popen(argv, env=env, cwd=self.dir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT, start_new_session=True)
+            self.p.stdin.write((json.dumps({"command": cmd}) + "\n").encode())
+            self.p.stdin.close()
+            threading.Thread(target=self.watch_disk, daemon=True).start()
+            timer = threading.Timer(timeout, self.kill, args=("time",))
+            timer.daemon = True
+            timer.start()
+            while True:
+                chunk = self.p.stdout.read1(8192) if hasattr(self.p.stdout, "read1") else self.p.stdout.read(8192)
+                if not chunk:
+                    break
+                if out_n < OUT_CAP:
+                    emit({"t": "out", "text": dec.decode(chunk[:OUT_CAP - out_n])})
+                out_n += len(chunk)
+                if out_n >= OUT_CAP and self.killed is None:
+                    self.kill("output")
+            self.p.wait()
+            timer.cancel()
+        finally:
+            if srv is not None:
+                srv.close()
+                shutil.rmtree(sd, ignore_errors=True)
+        code = self.p.returncode
+        self.result(ok=True, exit=None if self.killed in ("time", "stop", "disk") else code, killed=self.killed,
+                    secs=round(time.time() - t0, 2), out_bytes=out_n)
+
+    def op(self):
+        argv, env = inner(self.dir, ["op"])
+        try:
+            p = subprocess.run(argv, env=env, cwd=self.dir, input=(json.dumps(self.req) + "\n").encode(), capture_output=True,
+                               timeout=OP_TIMEOUT_S)
+            r = json.loads(p.stdout.decode("utf-8", "replace").strip().splitlines()[-1])
+        except subprocess.TimeoutExpired:
+            r = {"ok": False, "error": f"the file operation took over {OP_TIMEOUT_S} s"}
+        except (ValueError, IndexError):
+            r = {"ok": False, "error": "the sandbox gave no answer"}
+        self.result(**r)
+
+
+    def sealed(self):
+        """A Private chat's call (exec or a file operation) on its sealed folder; the new sealed file moved into place
+        when chat-run sealed one. The result carries the folder's version ("ver") and "missing" when the Mac expected a
+        folder that isn't here (removed after 30 idle days, or by hand): it started empty."""
+        s = self.req.get("seal")
+        try:
+            wk = base64.b64decode(str(s.get("wk") or ""), validate=True)
+            ver = int(s.get("ver") or 0)
+        except (ValueError, TypeError, AttributeError):
+            wk, ver = b"", -1
+        if len(wk) != 32 or ver < 0:
+            return self.result(ok=False, refused="a sealed call needs its key and version")
+        op = self.req.get("op")
+        is_run = op == "run"
+        cmd = str(self.req.get("command") or "")
+        if is_run and (not cmd.strip() or len(cmd) > 100_000):
+            return self.result(ok=False, refused="command: 1 to 100,000 characters")
+        timeout = max(1, min(MAX_TIMEOUT_S, int(self.req.get("timeout_s") or DEFAULT_TIMEOUT_S))) if is_run else OP_TIMEOUT_S
+        blob = sealed_path(self.cid)
+        tmpd = os.path.join(ROOT, ".tmp")
+        os.makedirs(tmpd, mode=0o700, exist_ok=True)
+        tag = f"{self.cid}.{os.getpid()}"
+        out, status = os.path.join(tmpd, f"{tag}.out"), os.path.join(tmpd, f"{tag}.json")
+        for f in (out, status):
+            os.close(os.open(f, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600))
+        work = tempfile.mkdtemp(prefix=f"{tag}.", dir=tmpd) if SANDBOX == "none" else None
+        sock = srv = sd = None
+        if is_run and self.mode == "web":
+            sd = tempfile.mkdtemp(prefix="halo-chat-", dir="/tmp")
+            sock = os.path.join(sd, "p.sock")
+            srv = socket.socket(socket.AF_UNIX)
+            srv.bind(sock)
+            os.chmod(sock, 0o600)
+            srv.listen(MAX_STREAMS)
+            threading.Thread(target=self.proxy_accept, args=(srv,), daemon=True).start()
+        args = ["sealed", "exec", self.mode] if is_run else ["sealed", "op"]
+        argv, env = inner(work, args, sock, sealed=(blob if os.path.exists(blob) else None, out, status))
+        line = dict({k: v for k, v in self.req.items() if k not in ("seal", "timeout_s")}, seal={"wk": s["wk"], "ver": ver, "chat": self.cid})
+        t0, out_n, got = time.time(), 0, []
+        dec = codecs.getincrementaldecoder("utf-8")("replace")
+        try:
+            self.p = subprocess.Popen(argv, env=env, cwd=work or ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT if is_run else subprocess.DEVNULL, start_new_session=True)
+            self.p.stdin.write((json.dumps(line) + "\n").encode())
+            self.p.stdin.flush()
+            line = None
+            if is_run:
+                self.soft = True  # from here a stop asks chat-run, which seals what the command did
+            else:
+                self.p.stdin.close()
+            timer = threading.Timer(timeout, self.kill, args=("time",))
+            timer.daemon = True
+            timer.start()
+            while True:
+                chunk = self.p.stdout.read1(8192) if hasattr(self.p.stdout, "read1") else self.p.stdout.read(8192)
+                if not chunk:
+                    break
+                if not is_run:
+                    got.append(chunk)
+                    continue
+                if out_n < OUT_CAP:
+                    emit({"t": "out", "text": dec.decode(chunk[:OUT_CAP - out_n])})
+                out_n += len(chunk)
+                if out_n >= OUT_CAP and self.killed is None:
+                    self.kill("output")
+            self.p.wait()
+            timer.cancel()
+            try:
+                self.p.stdin.close()
+            except (OSError, ValueError):
+                pass
+            try:
+                with open(status) as f:
+                    st = json.load(f)
+            except (OSError, ValueError):
+                st = {}
+            if st.get("ok") and st.get("sealed"):
+                if os.path.getsize(out) != st.get("bytes"):
+                    st = {"ok": False, "error": "the sealed folder came back short; the folder is as it was before"}
+                else:
+                    with open(out, "rb") as f:
+                        os.fsync(f.fileno())
+                    os.replace(out, blob)
+                    fd = os.open(ROOT, os.O_RDONLY)
+                    try:
+                        os.fsync(fd)
+                    finally:
+                        os.close(fd)
+                    set_meta(self.cid, bytes=os.path.getsize(blob), last=time.time())
+        finally:
+            if srv is not None:
+                srv.close()
+                shutil.rmtree(sd, ignore_errors=True)
+            for f in (out, status):
+                try:
+                    os.unlink(f)
+                except OSError:
+                    pass
+            if work:
+                shutil.rmtree(work, ignore_errors=True)
+        extra = {"ver": st.get("ver"), "missing": bool(st.get("missing"))} if st.get("ok") else {}
+        if not st.get("ok"):
+            if st.get("error"):  # chat-run's own words: the folder didn't open (wrong key, rolled back, damaged), or it was full
+                return self.result(ok=False, error=st["error"])
+            if self.killed:  # stopped before it could seal: what the command did isn't kept
+                return self.result(ok=True, exit=None, killed=self.killed, secs=round(time.time() - t0, 2), out_bytes=out_n,
+                                   unsaved=True)
+            return self.result(ok=False, error=st.get("error") or "the sandbox ended before it sealed the folder again")
+        if is_run:
+            return self.result(ok=True, exit=None if self.killed in ("time", "stop") else st.get("exit"), killed=self.killed,
+                               secs=round(time.time() - t0, 2), out_bytes=out_n, skipped=st.get("skipped") or None, **extra)
+        try:
+            r = json.loads(b"".join(got).decode("utf-8", "replace").strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            r = {"ok": False, "error": "the sandbox gave no answer"}
+        if self.killed == "time":
+            r = {"ok": False, "error": f"the file operation took over {OP_TIMEOUT_S} s"}
+        return self.result(**dict(r, **extra))
+
+
+def mounted(root=None, stat=os.stat, lstat=os.lstat, ismount=os.path.ismount):
+    """The chats filesystem is really there: ROOT is a mount point, on another device than its parent (/home/agent), and
+    holds the install's root-owned marker (a regular file). Tests (SANDBOX=none) have none and count as mounted."""
+    if SANDBOX == "none":
+        return True
+    import stat as _st
+    root = root or ROOT
+    try:
+        here, up = stat(root), stat(os.path.dirname(os.path.abspath(root)))
+        mk = lstat(os.path.join(root, MARKER))
+    except OSError:
+        return False
+    return bool(ismount(root)) and here.st_dev != up.st_dev and mk.st_uid == 0 and _st.S_ISREG(mk.st_mode)
+
+
+def chats_fs():
+    """(mounted, free bytes) of the chats filesystem."""
+    at = ROOT
+    while not os.path.exists(at) and os.path.dirname(at) != at:  # before the first call the folder may not exist yet
+        at = os.path.dirname(at)
+    try:
+        free = shutil.disk_usage(at).free
+    except OSError:
+        free = 0
+    return mounted(), free
+
+
+def health():
+    ok = False
+    if SANDBOX == "none":
+        ok = True
+    else:
+        try:
+            ok = subprocess.run(["bwrap", "--unshare-all", "--die-with-parent", "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin", "/bin",
+                                 "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64", "--", "/bin/true"],
+                                capture_output=True, timeout=20).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            ok = False
+    cs = chats()
+    on, free = chats_fs()
+    print(json.dumps({"bwrap": ok, "chats_fs": on, "free_gb": round(free / (1 << 30), 1), "python": sys.version.split()[0],
+                      "sealed": 1,  # this chat-tools takes a Private chat's sealed calls (the Mac sends none without it)
+                      "chats": len(cs), "total_gb": round(sum(recorded(c) for c in cs) / (1 << 30), 2),
+                      **({} if on else {"words": "chats disk not mounted"})}), flush=True)
+
+
+def main(argv):
+    if argv == ["--health"]:
+        return health() or 0
+    if len(argv) != 2 or not ID_RE.match(argv[0]) or argv[1] not in ("box", "web"):
+        print("chat-tools: <16 hex chat id> box|web", file=sys.stderr)
+        return 64
+    cid, mode = argv
+    line = sys.stdin.buffer.readline(LINE_MAX + 1)
+    try:
+        req = json.loads(line) if line and len(line) <= LINE_MAX else None
+    except ValueError:
+        req = None
+    line = None
+    if not isinstance(req, dict):
+        emit({"t": "result", "ok": False, "error": "a request line (JSON) first"})
+        return 64
+    op = req.get("op")
+    d = os.path.join(ROOT, cid)
+    sealed = isinstance(req.get("seal"), dict)
+    on, free = chats_fs()
+    if not on:  # layer 1 missing: nothing runs, and a wipe can't say "wiped" while the files sit in the image
+        emit({"t": "result", "ok": False, "refused": NOT_MOUNTED})
+        return 0
+    if op == "wipe":
+        remove_chat(cid)
+        emit({"t": "result", "ok": True, "text": "wiped"})
+        return 0
+    if sealed and os.path.isdir(d):
+        emit({"t": "result", "ok": False, "refused": "this chat has an unsealed folder on Toolbox, so it can't have a sealed one"})
+        return 0
+    if not sealed and os.path.exists(sealed_path(cid)):
+        emit({"t": "result", "ok": False, "refused": "this chat's folder on Toolbox is sealed: it opens only with its key"})
+        return 0
+    if op in ("run", "write", "edit", "put") and free < FLOOR:
+        emit({"t": "result", "ok": False, "refused": "Toolbox's chat folders have under 6 GB free; delete old chats first"})
+        return 0
+    try:
+        os.makedirs(ROOT, mode=0o700, exist_ok=True)
+        sweep()
+        if not sealed:
+            os.makedirs(d, mode=0o700, exist_ok=True)
+        set_meta(cid, last=time.time())
+    except OSError as e:
+        emit({"t": "result", "ok": False, "error": DISK_WORDS.get(e.errno, f"Toolbox couldn't use the chat's folder ({e.strerror})")})
+        return 0
+    mine = (os.path.getsize(sealed_path(cid)) if os.path.exists(sealed_path(cid)) else 0) if sealed else usage(d)[0]
+    if op in ("run", "write", "edit", "put") and sum(recorded(c) for c in chats() if c != cid) + mine > TOTAL_CAP:
+        emit({"t": "result", "ok": False, "refused": "the chat folders on Toolbox hold 100 GB together; delete old chats first"})
+        return 0
+    call = Call(cid, mode, req)
+    threading.Thread(target=call.read_stdin, daemon=True).start()
+    lock = None
+    try:
+        if sealed and op in ("run", "list", "read", "write", "edit", "search", "put", "get"):
+            locks = os.path.join(ROOT, ".locks")  # one call at a time on a sealed folder, so no change is lost
+            os.makedirs(locks, mode=0o700, exist_ok=True)
+            lock = open(os.path.join(locks, cid), "a")
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            call.sealed()
+        elif op == "run":
+            call.run()
+        elif op in ("list", "read", "write", "edit", "search", "put", "get"):
+            call.op()
+        else:
+            call.result(ok=False, refused="op: run, list, read, write, edit, search, put, get or wipe")
+    except OSError as e:  # a full or failing disk, in plain words
+        call.result(ok=False, error=DISK_WORDS.get(e.errno, f"Toolbox couldn't do it ({e.strerror or type(e).__name__})"))
+    finally:
+        if lock is not None:
+            lock.close()
+    try:
+        if not sealed:
+            set_meta(cid, bytes=usage(d)[0], last=time.time())
+    except OSError:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

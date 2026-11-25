@@ -1,0 +1,12 @@
+[Unit]
+Description=Network policy for DeepSeek inference processes
+Before=network-online.target
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/halo-inference-firewall
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

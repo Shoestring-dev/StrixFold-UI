@@ -1,0 +1,179 @@
+/* The private side's pages: the lock, the list's rows and confirms, a chat's attachments, the document viewer, the
+   settings and "Open elsewhere", on the tokens from app.css and chat.css. */
+:root { --viewer-w: min(44vw, 700px); }
+
+/* ---------- the sidebar: its two sections */
+.side-mode { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--faint); border-radius: 999px; padding: 3px; gap: 3px; }
+.side-mode a { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; border-radius: 999px; font-size: 15px; color: var(--muted); }
+.side-mode a:hover { color: var(--ink); }
+.side-mode a.on { background: var(--ink); color: var(--paper); }
+.side-block { display: flex; flex-direction: column; gap: 10px; min-height: 0; flex: 1; }
+
+/* ---------- the thread */
+.att-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-bottom: 8px; }
+.att-thumb { position: relative; margin: 0; width: 92px; display: flex; flex-direction: column; gap: 4px; }
+.att-thumb.sm { width: 64px; }
+.att-thumb img, .att-thumb.att-icon > svg, .att-gone { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: var(--fill); display: block; }
+.att-thumb.att-icon > svg { padding: 26%; fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.att-gone { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; }
+
+
+/* ---------- the composer */
+.s-atts { display: flex; flex-wrap: wrap; gap: 8px; }
+.s-atts:empty { display: none; }
+.s-att-note { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.35; }
+.s-chip { display: flex; align-items: center; gap: 8px; background: var(--fill); border-radius: 12px; padding: 5px 4px 5px 5px; margin-bottom: 8px; max-width: 100%; }
+.s-chip.up { opacity: .7; }
+.s-chip-b { display: flex; flex-direction: column; min-width: 0; }
+.s-chip-n { font-size: 13px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.s-chip-x { flex: none; background: none; border: 0; cursor: pointer; color: var(--muted); width: 36px; height: 36px; font-size: 18px; border-radius: 50%; }
+.s-chip-x:hover { color: var(--ink); background: var(--paper); }
+.seg { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.seg button { min-height: 36px; min-width: 44px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--faint); background: none; color: inherit; cursor: pointer; font-size: 14px; font-variant-numeric: tabular-nums; }
+.seg button:hover:not([disabled]) { border-color: var(--ink); }
+.seg button[aria-checked="true"], .seg button[aria-selected="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.seg button[disabled] { opacity: .4; cursor: not-allowed; }
+.s-drop { position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--paper) 88%, transparent); border: 2px dashed var(--signal); border-radius: 18px; margin: 12px; pointer-events: none; }
+.s-drop p { font-size: var(--fs-big-s); color: var(--signal); }
+
+/* ---------- the lock */
+.s-lock { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 6vh var(--gutter); }
+.s-lock-box { width: min(420px, 100%); display: flex; flex-direction: column; gap: 14px; }
+.s-lock-mark { width: 40px; height: 40px; fill: none; stroke: var(--signal); stroke-width: 2.2; }
+/* "Can't reach StrixFold UI": not a lock; the other icon, in the quiet ink */
+.s-lock .s-down-mark, .s-lock.down .s-lock-mark:not(.s-down-mark) { display: none; }
+.s-lock.down .s-down-mark { display: block; stroke: var(--muted, currentColor); }
+.s-lock-box h1 { font-size: var(--fs-big-s); line-height: 1.15; letter-spacing: -0.02em; font-weight: 400; }
+.s-lock-box > p { color: var(--muted); }
+.s-lock-box.noform .s-field, .s-lock-box.noform .check-s, .s-lock-box.noform button { display: none; }
+.s-lock-box .go.solid { align-self: flex-start; min-height: 44px; padding: 0 24px; }
+/* the Mac's idle lock (studio.js idleOn): a modal dialog over everything; its backdrop blurs the window, which stays
+   as it was underneath. #app is blurred too, for a browser without backdrop-filter. */
+dialog.idle-dlg { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0;
+  border: 0; background: color-mix(in srgb, var(--paper) 55%, transparent); color: var(--ink); overflow: auto; }
+dialog.idle-dlg::backdrop { background: transparent; -webkit-backdrop-filter: blur(28px) saturate(.7); backdrop-filter: blur(28px) saturate(.7); }
+body.idle-locked #app { filter: blur(24px); }
+html.idle-boot #app { visibility: hidden; }  /* theme.js: opened after the limit; studio.js locks it before it shows */
+html.idle-boot body::before { content: "StrixFold UI is locked. If this page stays empty, reload it."; position: fixed; top: 40vh; left: 0; right: 0;
+  text-align: center; color: var(--muted); }  /* only if studio.js never runs: the page fails closed, with a word why */
+@media print { body.idle-locked #app, html.idle-boot #app { display: none; } }  /* Cmd+P is the browser's: no copy of a locked page */
+dialog.idle-dlg .s-lock-box { background: var(--paper); border: 1px solid var(--faint); border-radius: 12px; padding: 28px; }
+.s-field { display: flex; flex-direction: column; gap: 6px; }
+.s-field span { color: var(--muted); font-size: 14px; }
+.s-field input { font: inherit; font-size: 18px; border: 0; border-bottom: 1px solid var(--ink); background: transparent; padding: 8px 0; color: inherit; border-radius: 0; }
+.s-field input:focus { outline: none; border-bottom-color: var(--signal); box-shadow: 0 1px 0 var(--signal); }
+
+/* ---------- the viewer: a panel beside the chat */
+.app.viewer-open { grid-template-columns: var(--side-w) minmax(0, 1fr) var(--viewer-w); }
+.viewer { display: flex; flex-direction: column; min-height: 0; height: 100vh; height: 100dvh; border-left: 1px solid var(--faint); background: var(--paper); outline: none; }
+.v-head { flex: none; display: flex; align-items: center; gap: 6px; min-height: 56px; padding: 0 8px 0 18px; border-bottom: 1px solid var(--faint); }
+.v-head h2 { flex: 1; min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.v-close { font-size: 28px; }
+.v-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 18px 28px; }
+.v-acts { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; align-items: center; }
+.v-acts:first-child { margin-top: 0; }
+/* a chat's PDF (renderDoc): its pages, drawn by the Mac, one under the other */
+.v-doc { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+.v-page { width: 100%; background: var(--fill); border-radius: 4px; box-shadow: 0 0 0 1px var(--faint); overflow: hidden; }
+.v-page img { display: block; width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.v-doc-note { color: var(--muted); font-size: 14px; padding: 12px; }
+.v-act { min-height: 40px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--faint); background: none; color: inherit; cursor: pointer; font: inherit; font-size: 14px; display: inline-flex; align-items: center; }
+.v-act:hover { border-color: var(--ink); }
+.inline-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; width: 100%; padding: 8px 0; }
+.inline-confirm p { flex: 1 1 220px; font-size: 14px; }
+.inline-confirm .row { display: flex; gap: 14px; align-items: center; }
+.go.danger-solid { background: var(--signal); border-color: var(--signal); color: var(--on-signal); min-height: 44px; }
+.go.danger-solid:hover { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.chat-item .inline-confirm { padding: 8px; }
+.chat-item .inline-confirm p { flex-basis: 100%; }
+
+/* ---------- the pages */
+.s-page { padding-top: 26px; padding-bottom: 8vh; max-width: 1240px; }
+.s-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid; padding-bottom: 12px; }
+.s-head h1 { font-size: var(--fs-big); line-height: 1; letter-spacing: -0.035em; font-weight: 300; }
+#page-studio-settings .s-head h1 { font-size: 24px; letter-spacing: -0.02em; font-weight: 400; }  /* Settings: a page title, not a poster (UX review #17) */
+.s-head-note { color: var(--muted); font-size: var(--fs-small); font-variant-numeric: tabular-nums; }
+
+.q-empty { color: var(--muted); padding: 12px 0; font-size: var(--fs-small); }
+
+.ss-sec { padding-top: 26px; max-width: 760px; }
+.ss-h { border-bottom: 1px solid var(--faint); padding-bottom: 8px; margin-bottom: 6px; }
+.ss-h h2 { font-size: var(--fs-big-s); letter-spacing: -0.018em; }
+.ss-h p { color: var(--muted); font-size: var(--fs-small); margin-top: 4px; max-width: 46em; }
+.ss-row { display: grid; grid-template-columns: 11em 1fr; align-items: center; gap: 4px 16px; padding: 8px 0; }
+.ss-l { color: var(--muted); }
+.ss-p { color: var(--muted); font-size: var(--fs-small); padding: 8px 0; max-width: 46em; }
+.ss-facts { margin: 10px 0 14px; }
+.ss-pass { display: flex; flex-direction: column; gap: 12px; max-width: 380px; margin-top: 22px; }
+.ss-pass h3, .ss-sub { font-size: 16px; font-weight: 500; }
+.ss-sub { margin-top: 24px; }
+.ss-pass .go { align-self: flex-start; min-height: 40px; }
+.ss-devs li { display: grid; grid-template-columns: 1fr auto; gap: 2px 16px; padding: 10px 0; border-bottom: 1px solid var(--faint); align-items: center; }
+.ss-devs small { color: var(--muted); font-size: 13px; grid-column: 1; }
+.ss-devs .textbtn { grid-column: 2; grid-row: 1 / span 2; min-height: 36px; }
+
+/* ---------- phones and narrow windows */
+@media (max-width: 1100px) { :root { --viewer-w: min(50vw, 560px); } }
+@media (max-width: 860px) {
+  .app.viewer-open { grid-template-columns: minmax(0, 1fr); }
+  .viewer { position: fixed; inset: 0; z-index: 70; border-left: 0; }
+  .v-head { padding-top: env(safe-area-inset-top); }
+  .att-thumb { width: 76px; }
+  .ss-row { grid-template-columns: 1fr; }
+  .seg button { min-height: 44px; }
+  .v-act { min-height: 44px; }
+  .s-chip-x { width: 44px; height: 44px; }
+}
+/* the toast stays in the main column while the viewer is open (and at the bottom on phones, over the sheet) */
+html.v-open .toast { left: calc(var(--side-w) + (100vw - var(--side-w) - var(--viewer-w)) / 2); }
+.msg-user.waiting .bubble { opacity: .7; border: 1px dashed var(--faint); background: transparent; }
+@media (max-width: 860px) {
+  html.v-open .toast { top: auto; bottom: 24px; left: 50%; }
+}
+/* thumb-sized controls on phones */
+@media (max-width: 600px) {
+  .msg-meta button { min-height: 44px; min-width: 44px; padding: 0 8px; }
+}
+.s-lock-link { align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; padding: 0 22px; }
+@media (max-width: 600px) {
+  .s-field input, .ss-pass .go, .s-page .go { min-height: 44px; }
+  .ss-devs .textbtn { min-height: 44px; min-width: 44px; }
+}
+@media (max-width: 600px) {
+  .topbar .chip { min-height: 44px; align-items: center; }
+}
+
+/* "Open elsewhere": the app's other addresses, plain links with Copy */
+.s-else { border-top: 1px solid var(--faint); margin-top: 8px; padding-top: 4px; }
+.s-else > summary { min-height: 44px; display: flex; align-items: center; padding: 0 8px; border-radius: 10px; cursor: pointer; font-size: 15px; list-style: none; }
+.s-else > summary::-webkit-details-marker { display: none; }
+.s-else > summary::after { content: ""; width: 6px; height: 6px; margin-left: 10px; border: solid var(--muted); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg) translate(-2px, -2px); }
+.s-else[open] > summary::after { transform: rotate(-135deg) translate(-1px, -1px); }
+.s-else > summary:hover { background: var(--fill); }
+.s-else .s-else-rows { padding: 0 8px 8px; }
+.else-row { padding: 6px 0; }
+.else-row + .else-row { border-top: 1px solid var(--faint); }
+.else-l { display: block; color: var(--muted); font-size: 13px; }
+.else-u { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.else-link { flex: 1; min-width: 0; display: block; line-height: 44px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-variant-numeric: tabular-nums; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--faint); }
+.else-link:hover { text-decoration-color: currentColor; }
+.else-copy { flex: none; min-height: 44px; min-width: 44px; font-size: 13px; }
+.else-note { display: block; color: var(--muted); font-size: 12px; line-height: 1.35; }
+#ss-else .s-else-rows { max-width: 34em; }
+
+/* pull down to refresh: a ring that follows the finger, then spins while the page reloads its state */
+.s-pull { position: fixed; left: 50%; z-index: 60; width: 44px; height: 44px; border-radius: 50%; background: var(--paper); border: 1px solid var(--faint);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .12); display: none; align-items: center; justify-content: center; pointer-events: none; }
+.s-pull.on { display: flex; }
+.s-pull i { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--muted); border-top-color: transparent; }
+.s-pull.armed i { border-color: var(--ink); border-top-color: transparent; }
+.s-pull.spin i { animation: s-pull-spin .8s linear infinite; }
+@keyframes s-pull-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .s-pull.spin i { animation: none; border-top-color: var(--ink); } }
+/* the phone page's header has nothing else in it: the status line gets the room (it was cut off at 390 px) */
+body.studio-only .chip { flex: 1; }
+body.studio-only .chip-state { max-width: none; }
+@media (max-width: 400px) { body.studio-only .chip { gap: 8px; } body.studio-only .chip-model { font-size: 15px; } body.studio-only .chip-state { font-size: 13px; } }
+
+.s-lock-box .err { color: var(--signal); }  /* a wrong passcode in the error colour */
+

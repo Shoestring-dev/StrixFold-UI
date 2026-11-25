@@ -1,0 +1,45 @@
+;; SearXNG for web_search under sandbox-exec. Deny by default.
+;; Reads: its venv, the Python runtime, its source (a pinned commit), its settings file, system libraries, locale and
+;; time zone data. Writes: its cache folder only (TMPDIR). Network: binds and accepts only on <its port> (Seatbelt
+;; filters a bind by port only; SearXNG binds 127.0.0.1 and SearxService.start checks that with lsof),
+;; connects out only on tcp 80 and 443 and never to this Mac itself (plus the system DNS resolver's socket). No fork,
+;; no other program. Seatbelt can only tell "localhost" from "any host", so LAN and tailnet addresses on 80/443 are not
+;; blocked here; SearXNG only contacts its fixed search engines (image and result proxies are off).
+;; It cannot read ~/.ssh, the private store (~/Pictures/StrixFoldUI), StrixFold UI or anything else of the user's.
+;; search.SearxService fills the params and the @ANCESTORS@ line (stat only, on the folders above those paths).
+(version 1)
+(deny default)
+
+(allow process-exec (literal (param "PYTHON")))
+
+(allow file-read*
+  (subpath (param "VENV"))
+  (subpath (param "RUNTIME"))
+  (subpath (param "SRC"))
+  (literal (param "SETTINGS"))
+  (subpath "/usr/lib")
+  (subpath "/usr/share/locale")
+  (subpath "/System/Library")
+  (subpath "/System/Cryptexes")
+  (subpath "/private/var/db/dyld")
+  (subpath "/private/var/db/timezone")
+  (literal "/"))
+
+(allow file-read-metadata
+  (literal "/private")
+  (literal "/var")
+  (literal "/etc")
+  (literal "/tmp")
+  (literal "/private/etc/localtime")
+  @ANCESTORS@)
+
+(allow file-read* file-write* (subpath (param "CACHE")))
+(allow file-read* file-write-data (literal "/dev/null"))
+(allow file-read* (literal "/dev/urandom") (literal "/dev/random"))
+(allow sysctl-read)
+
+(allow network-bind (local tcp (string-append "localhost:" (param "PORT"))))
+(allow network-inbound (local tcp (string-append "localhost:" (param "PORT"))))
+(allow network-outbound (remote tcp4 "*:80") (remote tcp4 "*:443"))  ; IPv4 only: with "tcp", the localhost deny below matched nothing (probe)
+(deny network-outbound (remote ip "localhost:*"))
+(allow network-outbound (literal "/private/var/run/mDNSResponder"))

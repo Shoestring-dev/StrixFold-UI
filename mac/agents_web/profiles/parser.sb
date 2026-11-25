@@ -1,0 +1,34 @@
+;; web_read's page parser (parse_child.py, trafilatura + lxml) under sandbox-exec. Deny by default.
+;; Reads: the parser venv, the Python runtime, the child script, system libraries, locale and time zone data.
+;; Writes: its own temporary folder only. No network of any kind, no fork, no other program.
+;; It cannot read ~/.ssh, the private store (~/Pictures/StrixFoldUI), StrixFold UI or anything else of the user's.
+;; read.Parser fills the params and the @ANCESTORS@ line (stat only, on the folders above those paths).
+(version 1)
+(deny default)
+
+(allow process-exec (literal (param "PYTHON")))
+
+(allow file-read*
+  (subpath (param "VENV"))
+  (subpath (param "RUNTIME"))
+  (literal (param "CHILD"))
+  (subpath "/usr/lib")
+  (subpath "/usr/share/locale")
+  (subpath "/System/Library")
+  (subpath "/System/Cryptexes")
+  (subpath "/private/var/db/dyld")
+  (subpath "/private/var/db/timezone")
+  (literal "/"))
+
+(allow file-read-metadata
+  (literal "/private")
+  (literal "/var")
+  (literal "/etc")
+  (literal "/tmp")
+  (literal "/private/etc/localtime")
+  @ANCESTORS@)
+
+(allow file-read* file-write* (subpath (param "TMP")))
+(allow file-read* file-write-data (literal "/dev/null"))
+(allow file-read* (literal "/dev/urandom") (literal "/dev/random"))
+(allow sysctl-read)

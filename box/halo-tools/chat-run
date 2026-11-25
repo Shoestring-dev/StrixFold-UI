@@ -1,0 +1,626 @@
+#!/usr/bin/python3 -I
+"""chat-run: the inside of one Chat tool call, run by chat-tools
+in a fresh bubblewrap sandbox whose only folder is /work (the chat's own folder) and whose network namespace is empty.
+Bound read-only at /run/chat-run. Python standard library only.
+
+  chat-run exec box|web   one line on stdin: {"command": "..."}; runs it with bash in /work, stdin closed, output on
+                          stdout; exits with its code. web: a listener on this sandbox's own 127.0.0.1:3128 passes each
+                          connection to /run/proxy.sock (chat-tools carries it to the Mac's filter) and the usual proxy
+                          variables point there.
+  chat-run op             one line on stdin: a file operation (list, read, write, edit, search, put, get); one JSON line
+                          out. Paths are relative to /work; inside the sandbox nothing else exists, so a link can't
+                          lead out either.
+  chat-run sealed exec box|web, chat-run sealed op
+                          the same for a Private chat: its folder is one sealed file (/run/sealed.in),
+                          opened into /work (a size-capped tmpfs of this sandbox only) with the key in the request line
+                          ("seal": {"wk", "ver", "chat"}), and sealed again into /run/sealed.out after anything that
+                          can change it. A line {"stop": why} on stdin stops the command; the folder is still sealed.
+                          How it went: /run/seal.json.
+
+Tests run it outside a sandbox with CHAT_RUN_WORK (the folder) and CHAT_RUN_PROXY (the socket's path)."""
+import base64
+import errno
+import hashlib
+import hmac
+import json
+import os
+import re
+import resource
+import signal
+import socket
+import struct
+import subprocess
+import sys
+import tarfile
+import threading
+
+WORK = os.environ.get("CHAT_RUN_WORK") or "/work"
+PROXY_SOCK = os.environ.get("CHAT_RUN_PROXY") or "/run/proxy.sock"
+PROXY_PORT = 3128
+READ_LINES, READ_CHARS = 400, 24000
+WRITE_MAX, FILE_MAX, PUT_MAX = 1 << 20, 5 << 20, 25 << 20
+LIST_MAX, SEARCH_MAX = 300, 100
+SKIP = {".git", "node_modules", ".venv", "venv", "__pycache__", ".cache", "dist", "build", ".next", "target"}
+PATH = os.environ.get("CHAT_RUN_PATH") or "/opt/node/bin:/usr/local/bin:/usr/bin:/bin"  # (tests: the eval harness's)
+
+
+class Refused(Exception):
+    pass
+
+
+def where(rel, must_exist=False):
+    """A path inside WORK from a relative one ("." is WORK): no absolute paths, no "..", nothing that resolves outside."""
+    rel = str(rel if rel is not None else ".").replace("\\", "/").strip() or "."
+    if "\0" in rel:
+        raise Refused("a path without NUL characters")
+    if rel.startswith("/"):
+        rel = rel[len(WORK):].lstrip("/") if rel == WORK or rel.startswith(WORK + "/") else None
+        if rel is None:
+            raise Refused("a path inside the chat's folder (relative, or under /work)")
+    if ".." in rel.split("/"):
+        raise Refused("a path inside the chat's folder, without ..")
+    p = os.path.normpath(os.path.join(WORK, rel))
+    real, base = os.path.realpath(p), os.path.realpath(WORK)
+    if real != base and not real.startswith(base + os.sep):
+        raise Refused("a path inside the chat's folder")
+    if must_exist and not os.path.lexists(p):
+        raise Refused(f"{rel} does not exist")
+    return p
+
+
+def shown(p):
+    return os.path.relpath(p, WORK)
+
+
+def is_binary(b):
+    return b"\0" in b[:8192]
+
+
+def op_list(a):
+    p = where(a.get("path"), True)
+    if not os.path.isdir(p):
+        raise Refused(f"{shown(p)} is not a folder")
+    rows = []
+    for e in sorted(os.scandir(p), key=lambda e: e.name)[:LIST_MAX]:
+        try:
+            st = e.stat(follow_symlinks=False)
+            kind = "link" if e.is_symlink() else "dir" if e.is_dir(follow_symlinks=False) else "file"
+            rows.append(f"{e.name}{'/' if kind == 'dir' else ''}\t{kind}\t{st.st_size if kind == 'file' else ''}")
+        except OSError:
+            continue
+    more = len(os.listdir(p)) - LIST_MAX
+    return "\n".join(rows) + (f"\n({more} more not listed)" if more > 0 else "") if rows else "(empty)"
+
+
+def op_read(a):
+    p = where(a.get("path"), True)
+    if not os.path.isfile(p):
+        raise Refused(f"{shown(p)} is not a file")
+    if os.path.getsize(p) > FILE_MAX:
+        raise Refused(f"{shown(p)} is over {FILE_MAX >> 20} MB")
+    with open(p, "rb") as f:
+        data = f.read()
+    if is_binary(data):
+        raise Refused(f"{shown(p)} is not a text file ({len(data):,} bytes)")
+    lines = data.decode("utf-8", "replace").splitlines()
+    start = max(1, int(a.get("start") or 1))
+    n = max(1, min(READ_LINES, int(a.get("lines") or READ_LINES)))
+    out = "\n".join(f"{i}\t{lines[i - 1]}" for i in range(start, min(len(lines), start + n - 1) + 1))
+    if len(out) > READ_CHARS:
+        out = out[:READ_CHARS] + "\n(cut here: read fewer lines)"
+    end = min(len(lines), start + n - 1)
+    return out + (f"\n(lines {start}-{end} of {len(lines)})" if end < len(lines) or start > 1 else "")
+
+
+def op_write(a):
+    p = where(a.get("path"))
+    content = str(a.get("content") if a.get("content") is not None else "")
+    if len(content.encode()) > WRITE_MAX:
+        raise Refused(f"content over {WRITE_MAX >> 20} MB")
+    if os.path.isdir(p):
+        raise Refused(f"{shown(p)} is a folder")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    where(shown(os.path.dirname(p)))  # the folder it lands in is still inside
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(content)
+    return f"wrote {shown(p)} ({len(content):,} characters)"
+
+
+def op_edit(a):
+    p = where(a.get("path"), True)
+    old, new = str(a.get("old") or ""), str(a.get("new") if a.get("new") is not None else "")
+    if not old:
+        raise Refused("old: the exact text to replace")
+    with open(p, encoding="utf-8", errors="strict") as f:
+        text = f.read()
+    n = text.count(old)
+    if n == 0:
+        raise Refused("old was not found in the file")
+    if n > 1 and a.get("replace_all") is not True:
+        raise Refused(f"old is in the file {n} times: give more of it, or replace_all")
+    text = text.replace(old, new) if a.get("replace_all") is True else text.replace(old, new, 1)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(text)
+    return f"edited {shown(p)} ({n if a.get('replace_all') is True else 1} replacement{'s' if n > 1 and a.get('replace_all') is True else ''})"
+
+
+def op_search(a):
+    pat = str(a.get("pattern") or "")
+    if not pat:
+        raise Refused("pattern: the text to find")
+    try:
+        rx = re.compile(pat if a.get("regex") is True else re.escape(pat), re.I)
+    except re.error as e:
+        raise Refused(f"the pattern is not a valid regular expression ({e})")
+    root, hits = where(a.get("path"), True), []
+    for dp, dn, fn in os.walk(root):
+        dn[:] = sorted(d for d in dn if d not in SKIP)
+        for f in sorted(fn):
+            fp = os.path.join(dp, f)
+            try:
+                if os.path.islink(fp) or os.path.getsize(fp) > FILE_MAX:
+                    continue
+                with open(fp, "rb") as fh:
+                    data = fh.read()
+            except OSError:
+                continue
+            if is_binary(data):
+                continue
+            for i, line in enumerate(data.decode("utf-8", "replace").splitlines(), 1):
+                if rx.search(line):
+                    hits.append(f"{shown(fp)}:{i}: {line.strip()[:200]}")
+                    if len(hits) >= SEARCH_MAX:
+                        return "\n".join(hits) + f"\n(stopped at {SEARCH_MAX} matches)"
+    return "\n".join(hits) or "no matches"
+
+
+def op_put(a):
+    p = where(a.get("path"))
+    data = base64.b64decode(a.get("b64") or "", validate=True)
+    if len(data) > PUT_MAX:
+        raise Refused(f"files up to {PUT_MAX >> 20} MB")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "wb") as f:
+        f.write(data)
+    return f"put {shown(p)} ({len(data):,} bytes)"
+
+
+def op_get(a):
+    p = where(a.get("path"), True)
+    if not os.path.isfile(p) or os.path.islink(p):
+        raise Refused(f"{shown(p)} is not a file")
+    if os.path.getsize(p) > PUT_MAX:
+        raise Refused(f"{shown(p)} is over {PUT_MAX >> 20} MB")
+    with open(p, "rb") as f:
+        return {"b64": base64.b64encode(f.read()).decode(), "name": os.path.basename(p), "path": shown(p)}
+
+
+OPS = {"list": op_list, "read": op_read, "write": op_write, "edit": op_edit, "search": op_search, "put": op_put, "get": op_get}
+
+
+def run_op():
+    try:
+        a = json.loads(sys.stdin.readline() or "{}")
+        fn = OPS.get(a.get("op"))
+        if fn is None:
+            raise Refused("op: " + ", ".join(OPS))
+        out = fn(a)
+        print(json.dumps({"ok": True, **(out if isinstance(out, dict) else {"text": out})}), flush=True)
+    except Refused as e:
+        print(json.dumps({"ok": False, "refused": str(e)}), flush=True)
+    except OSError as e:  # a full or failing disk, in plain words
+        words = {errno.ENOSPC: "Toolbox's chats disk is full", errno.EDQUOT: "Toolbox's chats disk is full",
+                 errno.EIO: "Toolbox's disk gave an I/O error (it may be full)"}.get(e.errno)
+        print(json.dumps({"ok": False, "error": words or f"{type(e).__name__}: {str(e)[:200]}"}), flush=True)
+    except (ValueError, UnicodeDecodeError) as e:
+        print(json.dumps({"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}), flush=True)
+
+
+# ---------------------------------------------------------------- exec
+def pump(a, b):
+    try:
+        while True:
+            d = a.recv(65536)
+            if not d:
+                break
+            b.sendall(d)
+    except OSError:
+        pass
+    finally:
+        for s in (a, b):
+            try:
+                s.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+
+def proxy_shim(srv):
+    """Each connection to this sandbox's 127.0.0.1:3128 goes to /run/proxy.sock as it is (chat-tools carries the bytes
+    to the Mac's filter, which reads the CONNECT or the request line)."""
+    while True:
+        try:
+            c, _ = srv.accept()
+        except OSError:
+            return
+        try:
+            u = socket.socket(socket.AF_UNIX)
+            u.connect(PROXY_SOCK)
+        except OSError:
+            c.close()
+            continue
+        for x, y in ((c, u), (u, c)):
+            threading.Thread(target=pump, args=(x, y), daemon=True).start()
+
+
+def proxy_env(port):
+    u = f"http://127.0.0.1:{port}"
+    env = {k: u for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "npm_config_proxy",
+                          "npm_config_https_proxy", "YARN_HTTP_PROXY", "YARN_HTTPS_PROXY", "PIP_PROXY", "CARGO_HTTP_PROXY")}
+    env.update(NO_PROXY="", no_proxy="", NODE_USE_ENV_PROXY="1")
+    return env
+
+
+def limits():
+    # RLIMIT_NPROC counts every process of the user (agent's dsh too), so it is a fork-bomb brake, not a tight cap;
+    # Linux only (on a Mac under tests it would count all of the user's processes)
+    lims = [(resource.RLIMIT_FSIZE, 2 << 30), (resource.RLIMIT_CORE, 0)]
+    if sys.platform.startswith("linux"):
+        lims.append((resource.RLIMIT_NPROC, 2048))
+    for lim, val in lims:
+        try:
+            resource.setrlimit(lim, (val, val))
+        except (ValueError, OSError):
+            pass
+
+
+def exec_env(mode):
+    env = {"HOME": WORK, "PATH": PATH, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TERM": "dumb", "NO_COLOR": "1",
+           "GIT_TERMINAL_PROMPT": "0", "PAGER": "cat", "TMPDIR": "/tmp"}
+    if mode == "web":
+        srv = socket.socket()
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        port = PROXY_PORT
+        try:
+            srv.bind(("127.0.0.1", port))
+        except OSError:  # outside a sandbox (tests): any free port
+            srv.bind(("127.0.0.1", 0))
+            port = srv.getsockname()[1]
+        srv.listen(32)
+        threading.Thread(target=proxy_shim, args=(srv,), daemon=True).start()
+        env.update(proxy_env(port))
+    return env
+
+
+def run_exec(mode):
+    a = json.loads(sys.stdin.readline() or "{}")
+    cmd = str(a.get("command") or "")
+    if not cmd.strip():
+        print("(no command)", flush=True)
+        return 64
+    limits()
+    env = exec_env(mode)
+    p = subprocess.run(["/bin/bash", "--noprofile", "--norc", "-c", cmd], cwd=WORK, env=env, stdin=subprocess.DEVNULL)
+    return p.returncode
+
+
+# ---------------------------------------------------------------- sealed: a Private chat's folder
+# At rest on Toolbox a Private chat's folder is one sealed file. Its key is made on the Mac from the chat's own key (so
+# deleting the chat shreds it) and is never stored here: it comes in this call's request line, through a pipe. The
+# folder is opened into /work, a size-capped tmpfs in this sandbox's own mount namespace, and sealed again into
+# /run/sealed.out (chat-tools moves it into place); the plaintext goes with the sandbox.
+#   file:  "hpw1" | chat id (16 ASCII) | version (8, big-endian) | nonce (8) | chunks
+#   chunk i: ct | tag (32), over 64 KiB of a tar stream (the last may be shorter; there is always a last one)
+#     ct  = AES-256-CTR(Kenc, counter block nonce | i (4) | 0 (4)) of the plaintext
+#     tag = HMAC-SHA256(Kmac, header | i (8) | last (1) | ct): a chunk can't be changed, moved, dropped or cut off
+#   Kenc, Kmac = HMAC-SHA256(key, "hpw1 enc"), HMAC-SHA256(key, "hpw1 mac")
+# The version only goes up; the Mac keeps the last one it saw and refuses an older file (a rolled-back folder).
+SEAL_MAGIC, SEAL_CHUNK, SEAL_TAG = b"hpw1", 1 << 16, 32
+SEAL_HEAD = 4 + 16 + 8 + 8
+SEALED_IN = os.environ.get("CHAT_RUN_SEALED_IN") or "/run/sealed.in"
+SEALED_OUT = os.environ.get("CHAT_RUN_SEALED_OUT") or "/run/sealed.out"
+SEAL_STATUS = os.environ.get("CHAT_RUN_SEAL_STATUS") or "/run/seal.json"
+CHAT_ID = re.compile(r"^[a-f0-9]{16}$")
+WRITES = ("write", "edit", "put")
+
+
+class Sealed(Exception):
+    pass
+
+
+def _aes_ctr():
+    """AES-256-CTR: python3-cryptography on Toolbox; on a Mac (tests) CommonCrypto, part of macOS."""
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    except ImportError:
+        if sys.platform != "darwin":
+            raise Sealed("python3-cryptography is missing on Toolbox") from None
+        import ctypes
+        cc = ctypes.CDLL("/usr/lib/system/libcommonCrypto.dylib")
+        cc.CCCryptorCreateWithMode.argtypes = [ctypes.c_uint32] * 4 + [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
+                                                                       ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int,
+                                                                       ctypes.c_uint32, ctypes.POINTER(ctypes.c_void_p)]
+        cc.CCCryptorUpdate.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_size_t,
+                                       ctypes.POINTER(ctypes.c_size_t)]
+        cc.CCCryptorRelease.argtypes = [ctypes.c_void_p]
+
+        def ctr(key, iv, data):
+            ref, n = ctypes.c_void_p(), len(data)
+            if cc.CCCryptorCreateWithMode(0, 4, 0, 0, iv, key, 32, None, 0, 0, 2, ctypes.byref(ref)) != 0:  # CTR, AES, CTR_BE
+                raise Sealed("CommonCrypto refused the key")
+            try:
+                out, moved = ctypes.create_string_buffer(n), ctypes.c_size_t(0)
+                if cc.CCCryptorUpdate(ref, data, n, out, n, ctypes.byref(moved)) != 0 or moved.value != n:
+                    raise Sealed("CommonCrypto failed")
+                return out.raw
+            finally:
+                cc.CCCryptorRelease(ref)
+        return ctr
+
+    def ctr(key, iv, data):
+        e = Cipher(algorithms.AES(key), modes.CTR(iv)).encryptor()
+        return e.update(data) + e.finalize()
+    return ctr
+
+
+def _subkeys(key):
+    return hmac.new(key, b"hpw1 enc", hashlib.sha256).digest(), hmac.new(key, b"hpw1 mac", hashlib.sha256).digest()
+
+
+class SealWriter:
+    """A sealed file written as a stream (tarfile's "w|" writes into it); close() writes the last chunk."""
+
+    def __init__(self, f, key, cid, ver):
+        self.f, self.ctr = f, _aes_ctr()
+        self.enc, self.mac = _subkeys(key)
+        self.nonce = os.urandom(8)
+        self.head = SEAL_MAGIC + cid.encode("ascii") + struct.pack(">Q", ver) + self.nonce
+        f.write(self.head)
+        self.i, self.buf, self.n = 0, bytearray(), len(self.head)
+
+    def _chunk(self, data, last):
+        if self.i >= 1 << 32:
+            raise Sealed("the folder is too big to seal")
+        ct = self.ctr(self.enc, self.nonce + struct.pack(">II", self.i, 0), bytes(data)) if data else b""
+        tag = hmac.new(self.mac, self.head + struct.pack(">QB", self.i, last) + ct, hashlib.sha256).digest()
+        self.f.write(ct + tag)
+        self.i, self.n = self.i + 1, self.n + len(ct) + SEAL_TAG
+
+    def write(self, b):
+        self.buf += b
+        while len(self.buf) > SEAL_CHUNK:  # the last chunk is written by close(), never here
+            self._chunk(self.buf[:SEAL_CHUNK], 0)
+            del self.buf[:SEAL_CHUNK]
+        return len(b)
+
+    def close(self):
+        self._chunk(self.buf, 1)
+        self.buf = bytearray()
+
+
+class SealReader:
+    """A sealed file read as a stream (tarfile's "r|" reads from it). Each chunk's tag is checked before its plaintext
+    is given out; a wrong chat, an older version, a changed, moved, dropped or cut-off chunk raise Sealed."""
+
+    def __init__(self, f, key, cid, at_least):
+        head = f.read(SEAL_HEAD)
+        if len(head) != SEAL_HEAD or head[:4] != SEAL_MAGIC:
+            raise Sealed("it isn't a sealed folder")
+        if head[4:20] != cid.encode("ascii"):
+            raise Sealed("it is another chat's folder")
+        self.ver = struct.unpack(">Q", head[20:28])[0]
+        if self.ver < at_least:
+            raise Sealed(f"it is older than this chat expects (version {self.ver}, not {at_least} or later): it was rolled back")
+        self.f, self.head, self.nonce, self.ctr = f, head, head[28:], _aes_ctr()
+        self.enc, self.mac = _subkeys(key)
+        self.i, self.done, self.buf = 0, False, bytearray()
+        self.cur = f.read(SEAL_CHUNK + SEAL_TAG)
+
+    def _next(self):
+        cur = self.cur
+        if len(cur) < SEAL_TAG:
+            raise Sealed("it was cut short")
+        nxt = self.f.read(SEAL_CHUNK + SEAL_TAG) if len(cur) == SEAL_CHUNK + SEAL_TAG else b""
+        last = 0 if nxt else 1
+        ct, tag = cur[:-SEAL_TAG], cur[-SEAL_TAG:]
+        want = hmac.new(self.mac, self.head + struct.pack(">QB", self.i, last) + ct, hashlib.sha256).digest()
+        if not hmac.compare_digest(want, tag):
+            raise Sealed("it was changed or damaged")
+        pt = self.ctr(self.enc, self.nonce + struct.pack(">II", self.i, 0), ct) if ct else b""
+        self.i, self.cur, self.done = self.i + 1, nxt, bool(last)
+        return pt
+
+    def read(self, n=-1):
+        while (n is None or n < 0 or len(self.buf) < n) and not self.done:
+            self.buf += self._next()
+        if n is None or n < 0:
+            out, self.buf = bytes(self.buf), bytearray()
+        else:
+            out = bytes(self.buf[:n])
+            del self.buf[:n]
+        return out
+
+    def finish(self):
+        """Every chunk checked, to the last one (tar may stop reading before it)."""
+        while not self.done:
+            self._next()
+
+
+def _extract_kw():
+    return {"filter": "tar"} if hasattr(tarfile, "tar_filter") else {}  # Python 3.12 on Toolbox; the Mac's 3.9 has none
+
+
+def open_work(key, cid, at_least):
+    """The sealed folder opened into WORK: (its version, or None when there was none; missing: there should have been)."""
+    if not os.path.exists(SEALED_IN) or os.path.getsize(SEALED_IN) == 0:
+        return None, at_least > 0
+    with open(SEALED_IN, "rb") as f:
+        r = SealReader(f, key, cid, at_least)
+        try:
+            with tarfile.open(fileobj=r, mode="r|") as t:
+                t.extractall(WORK, **_extract_kw())
+        except tarfile.TarError as e:
+            raise Sealed(f"its contents couldn't be read ({type(e).__name__})") from None
+        r.finish()
+    return r.ver, False
+
+
+def _walk(root):
+    for dp, dn, fn in os.walk(root):
+        dn.sort()
+        for name in sorted(dn) + sorted(fn):
+            yield os.path.join(dp, name)
+
+
+def seal_work(key, cid, ver):
+    """WORK sealed into SEALED_OUT at `ver`: (bytes written, what couldn't go in: sockets, pipes, unreadable files)."""
+    skipped = []
+    with open(SEALED_OUT, "wb") as f:
+        w = SealWriter(f, key, cid, ver)
+        with tarfile.open(fileobj=w, mode="w|", format=tarfile.PAX_FORMAT) as t:
+            for p in _walk(WORK):
+                arc = os.path.relpath(p, WORK)
+                try:
+                    ti = t.gettarinfo(p, arcname=arc)
+                    if ti is None or not (ti.isreg() or ti.isdir() or ti.issym() or ti.islnk()):
+                        skipped.append(arc)
+                        continue
+                    if ti.isreg():
+                        with open(p, "rb") as fh:
+                            t.addfile(ti, fh)
+                    else:
+                        t.addfile(ti)
+                except OSError:
+                    skipped.append(arc)
+        w.close()
+        f.flush()
+        os.fsync(f.fileno())
+    return w.n, skipped
+
+
+def _killpg(p):
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(p.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            return
+        try:
+            p.wait(3)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def _end_strays():
+    """In the sandbox (its own pid namespace; bwrap's init is pid 1): what the command left running in the background
+    stops before the folder is sealed, so nothing writes into it while it is read. Never outside a sandbox."""
+    if WORK != "/work" or os.getppid() != 1 or not sys.platform.startswith("linux"):
+        return
+    me = os.getpid()
+    for d in os.listdir("/proc"):
+        if d.isdigit() and int(d) not in (1, me):
+            try:
+                os.kill(int(d), signal.SIGKILL)
+            except OSError:
+                pass
+
+
+def sealed_exec(mode, a):
+    """The command, in its own process group; a {"stop": why} line on stdin (or stdin closing) stops it. (exit, why
+    stopped)"""
+    cmd = str(a.get("command") or "")
+    if not cmd.strip():
+        print("(no command)", flush=True)
+        return 64, None
+    env = exec_env(mode)
+    p = subprocess.Popen(["/bin/bash", "--noprofile", "--norc", "-c", cmd], cwd=WORK, env=env, stdin=subprocess.DEVNULL,
+                         start_new_session=True, preexec_fn=limits)
+    why = []
+
+    def control():
+        for line in sys.stdin:
+            try:
+                f = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(f, dict) and f.get("stop"):
+                why.append(str(f["stop"])[:20])
+                break
+        else:
+            why.append("stop")  # chat-tools went away
+        if p.poll() is None:
+            _killpg(p)
+    threading.Thread(target=control, daemon=True).start()
+    code = p.wait()
+    try:
+        os.killpg(p.pid, signal.SIGKILL)  # its own background jobs
+    except (ProcessLookupError, PermissionError):
+        pass
+    _end_strays()
+    return code, (why[0] if why else None)
+
+
+def run_sealed(args):
+    status = {"ok": False, "error": "the sealed call didn't finish"}
+    try:
+        a = json.loads(sys.stdin.readline() or "{}")
+        s = a.pop("seal", None) if isinstance(a, dict) else None
+        if not isinstance(s, dict):
+            raise Sealed("a sealed call needs its key")
+        try:
+            key = base64.b64decode(str(s.get("wk") or ""), validate=True)
+            want = int(s.get("ver") or 0)
+        except (ValueError, TypeError):
+            key, want = b"", -1
+        cid = str(s.get("chat") or "")
+        if len(key) != 32 or want < 0 or not CHAT_ID.match(cid):
+            raise Sealed("a sealed call needs its key, version and chat")
+        found, missing = open_work(key, cid, want)
+        cur = found if found is not None else want
+        killed, writes = None, False
+        if args[:1] == ["exec"]:
+            sys.stdout.flush()
+            code, killed = sealed_exec(args[1], a)
+            writes = True
+        else:
+            fn = OPS.get(a.get("op"))
+            try:
+                if fn is None:
+                    raise Refused("op: " + ", ".join(OPS))
+                out = fn(a)
+                res = {"ok": True, **(out if isinstance(out, dict) else {"text": out})}
+            except Refused as e:
+                res = {"ok": False, "refused": str(e)}
+            except OSError as e:
+                res = {"ok": False, "error": "this chat's folder is full (2 GB)" if e.errno in (errno.ENOSPC, errno.EDQUOT)
+                       else f"{type(e).__name__}: {str(e)[:200]}"}
+            except (ValueError, UnicodeDecodeError) as e:
+                res = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+            print(json.dumps(res), flush=True)
+            code, writes = 0, a.get("op") in WRITES and res.get("ok")
+        status = {"ok": True, "exit": code, "killed": killed, "ver": cur, "missing": missing, "sealed": False}
+        if writes:
+            n, skipped = seal_work(key, cid, max(cur, want) + 1)
+            status.update(sealed=True, ver=max(cur, want) + 1, bytes=n, skipped=skipped[:20])
+    except Sealed as e:
+        status = {"ok": False, "error": f"this chat's sealed folder couldn't be used: {e}"}
+    except OSError as e:
+        status = {"ok": False, "error": "this chat's folder is full (2 GB)" if e.errno in (errno.ENOSPC, errno.EDQUOT)
+                  else f"the sealed folder failed ({type(e).__name__}: {str(e)[:160]})"}
+    except (ValueError, KeyError) as e:
+        status = {"ok": False, "error": f"the sealed call failed ({type(e).__name__})"}
+    with open(SEAL_STATUS, "w") as f:
+        json.dump(status, f)
+    return 0 if status.get("ok") else 3
+
+
+if __name__ == "__main__":
+    if sys.argv[1:2] == ["op"]:
+        run_op()
+        sys.exit(0)
+    if sys.argv[1:2] == ["exec"] and sys.argv[2:3] in (["box"], ["web"]):
+        sys.stdout.flush()
+        sys.exit(run_exec(sys.argv[2]))
+    if sys.argv[1:] in (["sealed", "op"], ["sealed", "exec", "box"], ["sealed", "exec", "web"]):
+        sys.exit(run_sealed(sys.argv[2:]))
+    print("chat-run: exec box|web, op, or sealed exec box|web / sealed op", file=sys.stderr)
+    sys.exit(64)

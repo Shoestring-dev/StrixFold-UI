@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- StrixFold UI's dashboard server at login. A template: `halo-control install-login` fills the paths in and
+     loads it; `halo-control uninstall-login` removes it. Not installed unless you run that. PATH is the installing
+     shell's (launchd's own has no ~/.local/bin or Homebrew, so the Command Centre's claude, codex and gh would not be found);
+     Standard, not Background, so the dashboard isn't throttled like a background task. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.halo-control.dashboard</string>
+  <key>ProgramArguments</key>
+  <array><string>__PY__</string><string>-X</string><string>pycache_prefix=/var/empty/halo-nopyc</string><string>__SERVER__</string><string>serve</string></array>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>__PATH__</string><key>LANG</key><string>en_US.UTF-8</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>__LOG__</string>
+  <key>StandardErrorPath</key><string>__LOG__</string>
+  <key>ProcessType</key><string>Standard</string>
+</dict>
+</plist>

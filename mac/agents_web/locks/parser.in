@@ -1,0 +1,4 @@
+# The page parser for web_read (runs only in its Seatbelt sandbox). Compile: tools/setup_agents_tools.sh lock
+trafilatura==2.3.1
+lxml==6.1.3
+pypdf==6.21.2
