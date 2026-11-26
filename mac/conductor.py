@@ -148,9 +148,12 @@ class Conductor:
 
     def acquire(self, model_id, kind, key, want=0, stop=None, label=None, on_wait=None, avoid=()):
         """A lease on a slot for one request: the pair to send it to. An agent waits for room (None if stop is set);
-        a chat never waits. The pairs' states are read outside the lock (states)."""
+        a chat never waits. The pairs' states are read outside the lock (states). model_id may be a function, asked again
+        each time round (a connected server's model, which can change while an agent waits: chat_team.Team.model_id)."""
         waited = False
+        ask = model_id if callable(model_id) else (lambda: model_id)
         while True:
+            model_id = ask()
             states = self.states()
             with self.cv:
                 pick = self.choose(model_id, kind, key, want, avoid, states)

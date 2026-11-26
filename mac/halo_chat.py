@@ -78,7 +78,9 @@ CHAT_MODELS = [
 # Qwen engines Halogen replaced continue on Halogen at the same size (Kyojin's 512K at Halogen's 128K)
 LEGACY = {"long-documents": "quick-chat", "unc-agent": "unc-chat", "qwen38-flash-next": "qwen38-halogen-64k",
           **{f"qwen38-kyojin-{k}": f"qwen38-halogen-{k}" for k in ("16k", "64k", "128k", "256k")},
-          "qwen38-kyojin-512k": "qwen38-halogen-128k"}
+          "qwen38-kyojin-512k": "qwen38-halogen-128k",
+          "quick-chat-64k": "quick-chat"}  # (SERVER_64K: the 64K itself, apart from connect.py's server)
+SERVER_64K = "quick-chat-64k"  # connect.py: the default model's 64K beside its server's own window, which takes its place
 # Each model's one name in StrixFold UI (the chat, the header), by halod's model id
 MODEL_NAMES = {"dsv41": "DeepSeek V4.1", "dsv41-unc": "DeepSeek uncensored", "qwen38": "Qwen 3.8", "qwen38-kyojin": "Qwen 3.8 (Kyojin)",
                "qwen38-gufo21": "Qwen 3.8 (Gufo 0.21)", "qwen38-halogen": "Qwen 3.8"}
@@ -89,7 +91,11 @@ def size_ready(c, hs=None):
     """(offered, why not): a size is offered once the team (DeepSeek) or the team's measured run (the Qwen engines) has
     proven it for its model (the profile's proven flag) and it fits what serves it: DeepSeek's deploy RoPE kit (halod's
     limits; the bundle kit's 65,487 without a report), a Qwen engine's own longest window."""
-    p = _builtin().get(c["profile"]) or {}
+    p = _builtin().get(LEGACY.get(c["profile"], c["profile"]) if c["profile"] == SERVER_64K else c["profile"]) or {}
+    if (hs or {}).get("connected") and c["profile"] in own_sizes():  # connect.py: its server's window holds any size up to it
+        n = int((((hs or {}).get("profile") or {}).get("settings") or {}).get("context") or context_of(DEFAULT_MODEL))
+        mine = int((p.get("settings") or {}).get("context") or 0)
+        return (True, None) if c["profile"] == DEFAULT_MODEL or (p and mine <= n) else (False, "Bigger than your server's window")
     if not p:
         return False, "Not tested yet"
     if p.get("proven") is False:
@@ -100,6 +106,20 @@ def size_ready(c, hs=None):
         return False, "Longer than its engine serves" if own else "Needs a deploy with the long RoPE kit"
     return True, None
 DEFAULT_MODEL = "quick-chat"
+
+
+def shown_size(pid, n):
+    """connect.py: the size a chat shows as on a server of window n: a size the window caps is the server's own."""
+    if pid in own_sizes() and pid != DEFAULT_MODEL and context_of(pid) >= n:
+        return DEFAULT_MODEL
+    return pid
+
+
+def own_sizes():
+    """The default model's sizes: the one model connect.py's server runs, at any of them up to its window."""
+    return {c["profile"] for c in next(m for m in CHAT_MODELS if m["profile"] == DEFAULT_MODEL)["contexts"]} | {SERVER_64K}
+
+
 # Effort, as the engine understands it (both families take enable_thinking per request; max_tokens is per request too)
 EFFORTS = {
     "low": {"name": "Low", "desc": "Answers at once, no thinking", "thinking": False, "max_tokens": None},
@@ -276,12 +296,15 @@ def _builtin():
 def profile_of(chat):
     """The profile a chat's messages run on: its chosen size of its model (a legacy "long files" chat: that model's 64K)."""
     pid = chat.get("model") if chat.get("model") in CHAT_PROFILES else DEFAULT_MODEL
+    if pid == SERVER_64K and CONNECTED is not None and CONNECTED():
+        return pid
     return LEGACY.get(pid, pid)
 
 
 def model_of(chat):
     """The chat's model entry (a known chat profile, at any of its sizes; else the default)."""
     pid = profile_of(chat)
+    pid = LEGACY.get(pid, pid)
     return next(m for m in CHAT_MODELS if pid == m["profile"] or pid in [c["profile"] for c in m["contexts"]])
 
 
@@ -298,12 +321,23 @@ def models(hs=None):
             sizes.append(dict(c, context=context_of(c["profile"]), ready=ok, why=why))
         out.append(dict(m, contexts=sizes, model_id=prof.get("model_id"), context=(prof.get("settings") or {}).get("context"),
                         loaded=bool(serving and serving == prof.get("model_id")), state=(hs or {}).get("state") if serving == prof.get("model_id") else None))
-    if (hs or {}).get("connected"):  # connect.py: the one model, at the window its server has
+    if (hs or {}).get("connected"):  # connect.py: the one model, at its sizes up to the window its server has
         n = int((p.get("settings") or {}).get("context") or context_of(DEFAULT_MODEL))
-        out = [dict(m, context=n, contexts=[dict(c, k=size_name(n), context=n, ready=True, why=None, note="What your server has") for c in m["contexts"] if c["profile"] == DEFAULT_MODEL])
-               for m in out if m["profile"] == DEFAULT_MODEL]
+        m = next(x for x in out if x["profile"] == DEFAULT_MODEL)
+        sizes = [dict(c, profile=SERVER_64K if c["profile"] == DEFAULT_MODEL else c["profile"], ready=True, why=None, note="")
+                 for c in m["contexts"]]
+        sizes = [dict(c, context=context_of(c["profile"])) for c in sizes]
+        sizes = [c for c in sizes if c["context"] < n]
+        own = next(c for c in m["contexts"] if c["profile"] == DEFAULT_MODEL)
+        sizes.append(dict(own, k=size_name(n), context=n, ready=True, why=None, note="What your server has"))
+        named = CONNECTED is not None and CONNECTED()
+        out = [dict(m, context=n, contexts=sizes, more=MORE if named else "Your server hasn't said its window yet. " + MORE)]
     label = MODEL_NAMES.get(p.get("model_id")) or p.get("name")  # the loaded model, by its one name
-    return {"models": out, "legacy": LEGACY, "efforts": [{"id": k, "name": v["name"], "desc": v["desc"]} for k, v in EFFORTS.items()],
+    legacy = LEGACY
+    if (hs or {}).get("connected"):  # the page shows a chat on a size the window caps as on the server's own
+        legacy = {**{k: v for k, v in LEGACY.items() if k != SERVER_64K},
+                  **{c: DEFAULT_MODEL for c in own_sizes() if shown_size(c, n) == DEFAULT_MODEL and c != DEFAULT_MODEL}}
+    return {"models": out, "legacy": legacy, "efforts": [{"id": k, "name": v["name"], "desc": v["desc"]} for k, v in EFFORTS.items()],
             "serving": {"profile": p.get("id"), "name": label, "model_id": p.get("model_id"), "state": (hs or {}).get("state"),
                         "context": (p.get("settings") or {}).get("context")} if hs else None}
 
@@ -312,7 +346,7 @@ def need(chat):
     """(profile id, model id) a chat's message needs serving: its chosen size. Any size of the same model serves it
     (each answer fits the window that is loaded); the size is what a Switch starts."""
     pid = profile_of(chat)
-    return pid, (_builtin().get(pid) or {}).get("model_id")
+    return pid, (_builtin().get(LEGACY.get(pid, pid)) or {}).get("model_id")
 
 
 CHARS_PER_TOKEN = 3.2
@@ -348,13 +382,22 @@ def sample_seed():
 CONNECTED = None  # connect.py: what says the window of the server the app is connected to
 
 
+MORE = "For more, raise CONTEXT in my.conf on both boxes, then restart."  # (the README says what past 63,488 needs)
+
+
 def size_name(n):
     return "64K" if n == 63488 else f"{round(n / 1e6)}M" if n >= 1_000_000 else f"{round(n / 1024)}K"
 
 
 def context_of(profile_id):
-    if CONNECTED is not None and CONNECTED():
-        return CONNECTED()
+    if CONNECTED is not None and CONNECTED():  # connect.py: the server's window, or a smaller size the chat chose
+        n = CONNECTED()
+        if profile_id == DEFAULT_MODEL or profile_id not in own_sizes():
+            return n
+        own = int(((_builtin().get(LEGACY.get(profile_id, profile_id)) or {}).get("settings") or {}).get("context") or 0)
+        return min(own, n) if own else n
+    if profile_id == SERVER_64K:
+        profile_id = DEFAULT_MODEL
     return int(((_builtin().get(profile_id) or {}).get("settings") or {}).get("context") or 16384)
 
 
@@ -409,10 +452,14 @@ def attachment_chars(store, a, looker=None):
 def longer_words(m, pid, what="This is", hs=None):
     """"This is longer than the 64K window. Choose 128K in the composer, or split it." (the next size offered; the user
     never sees the engine's own wording)."""
-    ctx = context_of(pid)
-    bigger = next((c for c in m["contexts"] if context_of(c["profile"]) > ctx and size_ready(c, hs)[0]), None)
+    ctx, connected = context_of(pid), CONNECTED is not None and CONNECTED()
+    sizes = m["contexts"] + ([{"k": "64K", "profile": SERVER_64K}] if connected and m["profile"] == DEFAULT_MODEL else [])
+    sizes = sorted(sizes, key=lambda c: context_of(c["profile"]))  # (connected: the default's own is the server's)
+    bigger = next((c for c in sizes if context_of(c["profile"]) > ctx and size_ready(c, hs)[0]), None)
+    if bigger and connected:
+        bigger = dict(bigger, k=size_name(context_of(bigger["profile"])))
     tip = f" Choose {bigger['k']} in the composer, or split it." if bigger else " Split it into parts."
-    k = size_name(ctx) if CONNECTED is not None and CONNECTED() else next((c["k"] for c in m["contexts"] if c["profile"] == pid), f"{round(ctx / 1024)}K")
+    k = size_name(ctx) if connected else next((c["k"] for c in m["contexts"] if c["profile"] == pid), f"{round(ctx / 1024)}K")
     return f"{what} longer than {m['name']}'s {k} window.{tip}"
 
 
@@ -1863,6 +1910,8 @@ def chat_window(chat, served):
     chat chose a larger window. The main boxes' 1M pool keeps several long conversations' kept rows (two chats of
     110K and 170K taking turns resumed in 4 s instead of re-reading for 96-149 s); one chat growing toward 750K would
     fill it and, pushed out, read cold for 13-16 minutes."""
+    if CONNECTED is not None and CONNECTED():  # connect.py: one server's window, and the chat keeps to the size it chose
+        return min(served, context_of(profile_of(chat)))
     return min(served, max(context_of(profile_of(chat)) or 0, WINDOW_CAP))
 
 

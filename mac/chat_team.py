@@ -333,10 +333,7 @@ class Team:
                                  error=a.get("wrap_why") or "stopped", report=self._salvage(a, "was stopped"),
                                  wrap_why=None, wrap_at=None)
                         continue
-                    if self.connected():  # no box to carry on with
-                        import connect
-                        a.update(status="interrupted", ended=a.get("ended") or time.time(), doing=None, error=connect.TEAM)
-                    elif a["status"] == "queued" or time.time() - last < RESUME_WITHIN_S:  # the app restarted: it carries on
+                    if a["status"] == "queued" or time.time() - last < RESUME_WITHIN_S:  # the app restarted: it carries on
                         a.update(status="queued", pair=None, pair_label=None, resume=bool(a.get("started")),
                                  doing="Waiting for a free slot (the app restarted)", doing_since=time.time())
                         self._log(a, "restart", text="The app restarted; it carries on from its last step.")
@@ -348,11 +345,22 @@ class Team:
 
     # -- the chip
     def connected(self):
-        return bool((getattr(self.app, "cfg", None) or {}).get("connect"))  # connect.py: no boxes for agents
+        return bool((getattr(self.app, "cfg", None) or {}).get("connect"))  # connect.py: a running server, not the app's boxes
+
+    def model_id(self):
+        """Every agent's model: DeepSeek uncensored; connected to a running StrixFold server (connect.py), the one
+        model it serves. Its free streams are the agents' slots, one kept for the chats as on any pair; the app never
+        starts, stops or switches that server (Team with connect, "yes"). While the server doesn't answer (a dropped
+        tunnel, its restart), the last one it served: never DeepSeek uncensored's id, which a waiting agent would then
+        wait for until the watcher's 45 minutes (review). The rules an agent works under stay uncensored's (_call)."""
+        if not self.connected():
+            return MODEL_ID
+        mid = ((self.app.halod_state() or {}).get("profile") or {}).get("model_id")
+        if mid:
+            self._served = mid
+        return mid or getattr(self, "_served", None) or "dsv41"
 
     def cap(self, cid):
-        if self.connected():
-            return 0
         return int((self.s.kv("chat_team", {}) or {}).get(cid) or 0)
 
     def set_cap(self, cid, n):
@@ -691,9 +699,6 @@ class Team:
         a = self._find(cid, aid)
         if a["status"] in LIVE:
             raise ValueError(f"{aid} is still {a['status']}")
-        if self.connected():
-            import connect
-            raise ValueError(connect.TEAM)
         if "_messages" not in a:
             self._load(cid, a)
         b = self.spawn(cid, a["level"], a.get("opts") or {}, a["name"], a["brief"], role=a.get("role", "general"),
@@ -791,7 +796,7 @@ class Team:
         if not st or st.get("state") != "ready":
             return 0
         prof = st.get("profile") or {}
-        if prof.get("model_id") != MODEL_ID:
+        if prof.get("model_id") != self.model_id():
             return 0
         n = int((prof.get("settings") or {}).get("streams") or 1)
         return n if C_.Conductor.lent(name, st) else max(0, n - RESERVE)
@@ -877,17 +882,18 @@ class Team:
         if not queued:
             return
         queued.sort(key=lambda x: x[1]["created"])
-        start = queued[:max(0, self.cond.agent_slots(MODEL_ID) - running)]
+        start = queued[:max(0, self.cond.agent_slots(self.model_id()) - running)]
         for cid, a in start:
             a.update(status="running", started=a.get("started") or time.time(), doing="Starting", doing_since=time.time(),
                      last_step=time.time())
             self._log(a, "start", text="Back at work" if a.get("resume") else "Started")
             self.save(cid, a)
             threading.Thread(target=self._run, args=(cid, a), name=f"team-{cid[:6]}-{a['id']}", daemon=True).start()
-        if len(queued) > len(start):  # more waiting than room: an idle pair is started (the main boxes only when idle)
+        if len(queued) > len(start) and not self.connected():  # more waiting than room: an idle pair is started (the main boxes
+            # only when idle; never a connected server: they wait for its free streams)
             for n, label, st in self._pairs():
                 state = (st or {}).get("state")
-                busy_other = st and state == "ready" and (st.get("profile") or {}).get("model_id") != MODEL_ID
+                busy_other = st and state == "ready" and (st.get("profile") or {}).get("model_id") != MODEL_ID  # (never connected)
                 one_slot = st and state == "ready" and not busy_other and self._capacity(st, n) == 0
                 if st is None or (n == "halos" and (busy_other or one_slot)):
                     continue  # never switch the main boxes away from what they run
@@ -965,6 +971,8 @@ class Team:
             a["_halt"] = halt
             if a.get("stopping") or a["_stop"].is_set():
                 halt.set()
+        # its tools' rules are DeepSeek uncensored's on any server (chat_full's FOLDER_ONLY and TAP_EVERY): connected,
+        # nothing widens (review)
         ctx = T.TurnCtx(cid, chat, self.s, MODEL_ID, level=a["level"], opts=a.get("opts") or {}, private=False,
                         stop=halt, ask=lambda req: "deny", emit=lambda ev: None, app=self.app, fake=self.fake)
         wall = a.get("wall_s", AGENT_WALL_S)
@@ -991,7 +999,7 @@ class Team:
         key, who, waits, refitted = f"{cid}/{a['id']}", f"{a['name']} ({a['id']})", list(RETRY_S), False
         specs_tokens = len(json.dumps(specs)) // CHARS_PER_TOKEN if specs else 0  # the tools' specs share the window
         while True:
-            lease = self.cond.acquire(MODEL_ID, "agent", key, stop=a["_stop"], label=who,
+            lease = self.cond.acquire(self.model_id, "agent", key, stop=a["_stop"], label=who,
                                       on_wait=lambda: self._doing(a, "Waiting for a free slot", "wait"))
             if lease is None:
                 raise Stopped()
@@ -1556,7 +1564,7 @@ class LeadTools(T.Toolset):
                                workdir=args.get("workdir"), thinking=args.get("thinking") is not False,
                                max_minutes=args.get("max_minutes"), max_steps=args.get("max_steps"),
                                done_when=args.get("done_when"))
-                free = team.cond.agent_slots(MODEL_ID) - sum(1 for x in team.chats.get(cid) or [] if x["status"] == "running")
+                free = team.cond.agent_slots(team.model_id()) - sum(1 for x in team.chats.get(cid) or [] if x["status"] == "running")
                 where = "starting now" if free > 0 else "queued until a slot frees up"
                 tools = f"sandboxed ({T.WORDS[a['level']]['name']})" if a["sandbox"] else f"this chat's tools ({T.WORDS[a['level']]['name']})"
                 extras = ", ".join(x for x in (a["role"] if a["role"] != "general" else None, "forked" if a.get("fork") else None,

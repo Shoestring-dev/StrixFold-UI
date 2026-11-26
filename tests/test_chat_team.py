@@ -473,6 +473,53 @@ class Team(unittest.TestCase):
             self.assertLessEqual(len(x), T.OUT_MODEL)
             self.assertTrue(x.endswith(" END"))
 
+    def test_connected_to_a_running_server_agents_take_its_free_streams(self):
+        """connect.py (Team with connect, "yes"): the one server it reaches is the only pair, on whatever
+        model it serves; agents take its streams less the one kept for chats, and the app never starts or switches
+        it."""
+        self.app.cfg = {"connect": "node0"}
+        self.app.states = {"halos": ready(3, model="dsv41", pid="dsv41-connected")}
+        self.team.set_cap(self.cid, 4)
+        self.assertEqual(self.team.cap(self.cid), 4)
+        self.assertEqual(self.team.model_id(), "dsv41")
+        self.model.hold.clear()  # the first steps wait, so the slots stay taken while we look
+        for i in range(3):
+            self.team.spawn(self.cid, "box", {}, f"a{i}", f"brief {i}")
+        self.wait(lambda: sum(1 for a in self.team.view(self.cid)["agents"] if a["status"] == "running") == 2)
+        time.sleep(0.5)
+        agents = self.team.view(self.cid)["agents"]
+        self.assertEqual(sorted(a["status"] for a in agents), ["queued", "running", "running"])  # 3 streams, 1 kept for chats
+        self.assertEqual(self.app.posts, [])  # never started, stopped or switched
+        self.model.hold.set()
+        self.wait(lambda: all(a["status"] not in CT.LIVE for a in self.team.view(self.cid)["agents"]))
+        self.assertTrue(all(a["status"] == "done" for a in self.team.view(self.cid)["agents"]))
+        self.assertEqual(set(self.model.endpoints), {"http://halos/v1"})
+        self.assertEqual(self.app.posts, [])
+
+    def test_connected_an_agent_carries_on_after_the_server_drops_for_a_moment(self):
+        """Its next step asked the conductor for DeepSeek uncensored's id while the stand-in said failed, and waited
+        for that pair for the watcher's 45 minutes after the server was back (review). The server's model is asked
+        again while it waits; and its tools keep uncensored's rules whatever the server runs."""
+        self.app.cfg = {"connect": "node0"}
+        up = ready(2, model="dsv41", pid="dsv41-connected")
+        self.app.states = {"halos": up}
+        app, seen = self.app, []
+
+        class Drops(FakeTools):
+            def call(self, name, args, ctx):
+                seen.append(ctx.model_id)
+                app.states["halos"] = {"state": "failed", "profile": None}  # the tunnel drops as the tool runs
+                threading.Timer(1.5, lambda: app.states.__setitem__("halos", up)).start()
+                return T.result("ran", "ran")
+        self.team.toolsets = lambda ctx: [Drops(ctx, self.calls)]
+        self.team.set_cap(self.cid, 2)
+        self.team.spawn(self.cid, "box", {}, "a0", "one command, then report")
+        self.wait(lambda: self.team.view(self.cid)["agents"][0]["status"] not in CT.LIVE, 12)
+        a = self.team.view(self.cid)["agents"][0]
+        self.assertEqual(a["status"], "done", a.get("doing"))
+        self.assertEqual(seen, [CT.MODEL_ID])  # its tools' rules: uncensored's (FOLDER_ONLY, TAP_EVERY), nothing widens
+        self.assertEqual(self.app.posts, [])
+
     def test_watcher_wraps_up_a_loop(self):
         self.team.set_cap(self.cid, 2)
         m = self._agent_model(lambda n, msgs: self._tool_reply("same thing"))

@@ -106,18 +106,20 @@ class What(Base):
 
     def test_its_window_decides_the_size(self):
         halo_chat.CONNECTED = self.stand.window
-        for n, k in ((8192, "8K"), (16384, "16K"), (63488, "64K"), (131072, "128K"), (524288, "512K"), (1046510, "1M")):
+        below = [("quick-chat-16k", "16K", True), (halo_chat.SERVER_64K, "64K", True), ("quick-chat-128k", "128K", True),
+                 ("quick-chat-256k", "256K", True), ("quick-chat-512k", "512K", True)]
+        for n, k, smaller in ((8192, "8K", 0), (16384, "16K", 0), (63488, "64K", 1), (131072, "128K", 2), (524288, "512K", 4), (1046510, "1M", 5)):
             Engine.health = dict(HEALTH, context_length=n)
             st = self.look()
             self.assertEqual((st["profile"]["id"], st["profile"]["settings"]["context"], halo_chat.context_of("quick-chat")), ("quick-chat", n, n))
             m = halo_chat.models(st)
-            self.assertEqual([(x["profile"], x["loaded"], [(c["profile"], c["k"], c["ready"]) for c in x["contexts"]]) for x in m["models"]], [("quick-chat", True, [("quick-chat", k, True)])])
+            self.assertEqual([(x["profile"], x["loaded"], [(c["profile"], c["k"], c["ready"]) for c in x["contexts"]]) for x in m["models"]], [("quick-chat", True, below[:smaller] + [("quick-chat", k, True)])])
             why = halo_chat.too_long({"model": None}, 60_000, st)  # what one message may hold, in the server's own size
             self.assertEqual((why is None, k in (why or k)), (n > 16384, True), why)
         self.tunnel.state = "down"
         st = self.look()
         self.assertEqual(halo_chat.context_of("quick-chat"), 1046510)  # the last it named, while it is away
-        self.assertEqual([(c["k"]) for x in halo_chat.models(st)["models"] for c in x["contexts"]], ["1M"])
+        self.assertEqual([(c["k"]) for x in halo_chat.models(st)["models"] for c in x["contexts"]], ["16K", "64K", "128K", "256K", "512K", "1M"])
         halo_chat.CONNECTED = None
         self.assertGreater(len(halo_chat.models({"state": "ready", "profile": {"model_id": "dsv41"}})["models"]), 1)  # not connected: every model
 
@@ -143,6 +145,65 @@ class What(Base):
         self.assertIsNone(halo_chat.too_long({"model": None}, 30_000, st))
         self.assertIn("64K", halo_chat.too_long({"model": None}, 400_000, st))
         self.assertTrue([c["k"] for x in halo_chat.models(st)["models"] for c in x["contexts"]])
+
+
+class Sizes(Base):
+    """Every size up to the server's own window, chosen with no restart, and one line on starting the server bigger."""
+    def sheet(self, n):
+        Engine.health = dict(HEALTH, context_length=n)
+        st = self.look()
+        return st, halo_chat.models(st)
+
+    def test_every_size_up_to_the_servers_own(self):
+        halo_chat.CONNECTED = self.stand.window
+        st, m = self.sheet(524288)
+        sizes = m["models"][0]["contexts"]
+        self.assertEqual([(c["k"], c["context"]) for c in sizes], [("16K", 16384), ("64K", 63488), ("128K", 131072), ("256K", 262144), ("512K", 524288)])
+        self.assertEqual((sizes[-1]["profile"], sizes[-1]["note"]), ("quick-chat", "What your server has"))
+        self.assertTrue(all(c["ready"] for c in sizes))
+        self.assertEqual(m["models"][0]["more"], "For more, raise CONTEXT in my.conf on both boxes, then restart.")
+        self.assertNotIn(halo_chat.SERVER_64K, m["legacy"])  # the page keeps the connect-only 64K apart from the server's
+        for pid, n in (("quick-chat-16k", 16384), (halo_chat.SERVER_64K, 63488), ("quick-chat-256k", 262144), ("quick-chat", 524288), (None, 524288)):
+            chat = {"model": pid}
+            self.assertEqual((halo_chat.context_of(halo_chat.profile_of(chat)), halo_chat.chat_window(chat, 524288)), (n, n), pid)
+            self.assertEqual(halo_chat.need(chat)[1], "dsv41")
+        self.assertFalse(halo_chat.size_ready({"k": "1M", "profile": "quick-chat-1m"}, st)[0])
+        self.assertIn("Choose 64K", halo_chat.too_long({"model": "quick-chat-16k"}, 100_000, st))
+
+    def test_a_size_the_server_no_longer_holds_shows_as_its_own(self):
+        halo_chat.CONNECTED = self.stand.window
+        st, m = self.sheet(131072)
+        self.assertEqual({k: v for k, v in m["legacy"].items() if k.startswith("quick-chat")},
+                         {"quick-chat-128k": "quick-chat", "quick-chat-256k": "quick-chat", "quick-chat-512k": "quick-chat", "quick-chat-1m": "quick-chat"})
+        self.assertEqual([halo_chat.shown_size(p, 131072) for p in ("quick-chat-16k", halo_chat.SERVER_64K, "quick-chat-1m")],
+                         ["quick-chat-16k", halo_chat.SERVER_64K, "quick-chat"])
+        self.assertEqual(halo_chat.chat_window({"model": "quick-chat-1m"}, 131072), 131072)  # it sends, in the server's window
+
+    def test_a_blip_never_takes_the_sizes_away(self):
+        halo_chat.CONNECTED = self.stand.window
+        self.sheet(524288)
+        Engine.hcode, Engine.health = 503, {"status": "failed"}
+        st = self.look()
+        self.assertEqual(st["state"], "failed")
+        self.assertEqual([halo_chat.size_ready({"profile": p}, st)[0] for p in ("quick-chat-16k", "quick-chat-256k", "quick-chat-1m")], [True, True, False])
+
+    def test_before_the_server_names_its_window_the_line_says_so(self):
+        self.tunnel.state = "starting"
+        st = self.look()
+        halo_chat.CONNECTED = self.stand.window
+        more = halo_chat.models(st)["models"][0]["more"]
+        self.assertTrue(more.startswith("Your server hasn't said its window yet."), more)
+
+    def test_a_small_server_offers_only_what_fits(self):
+        halo_chat.CONNECTED = self.stand.window
+        for n, want in ((8192, ["8K"]), (16384, ["16K"]), (63488, ["16K", "64K"]), (100000, ["16K", "64K", "98K"])):
+            self.assertEqual([c["k"] for c in self.sheet(n)[1]["models"][0]["contexts"]], want, n)
+
+    def test_away_from_a_server_the_64k_is_the_64k(self):
+        halo_chat.CONNECTED = None
+        chat = {"model": halo_chat.SERVER_64K}
+        self.assertEqual((halo_chat.profile_of(chat), halo_chat.context_of(halo_chat.SERVER_64K)), ("quick-chat", 63488))
+        self.assertIsNone(halo_chat.models({"state": "ready", "profile": {"model_id": "dsv41"}})["models"][0].get("more"))
 
 
 class Wrong(Base):
@@ -263,22 +324,18 @@ class Served(Base):
                 s.sendall(b"POST /api/start HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: " + n + b"\r\n\r\n")
                 self.assertIn(b"409", s.recv(200), n)
 
-    def test_team_is_off_whatever_was_set_before(self):
+    def test_team_keeps_its_cap_and_runs_on_the_served_model(self):
+        """Team works connected: the cap set before stays, and agents use the model the server serves."""
         import chat_team
         t = chat_team.Team.__new__(chat_team.Team)
 
         class Store:
             def kv(self, k, d=None):
                 return {"c1": 3}
-
-            def chat(self, cid):
-                return {"id": cid}
-        t.s, t._find = Store(), lambda cid, aid: {"status": "done"}
-        for cfg, cap in (({}, 3), ({"connect": "node0"}, 0)):
-            t.app = type("A", (), {"cfg": cfg})()
-            self.assertEqual(t.cap("c1"), cap)
-        self.assertRaisesRegex(ValueError, "Team mode is off", t.spawn, "c1", "none", {}, "x", "a brief")
-        self.assertRaisesRegex(ValueError, "Team isn't there", t.retry, "c1", "a1")
+        t.s = Store()
+        for cfg, model in (({}, chat_team.MODEL_ID), ({"connect": "node0"}, "dsv41")):
+            t.app = type("A", (), {"cfg": cfg, "halod_state": lambda self: {"state": "ready", "profile": {"model_id": "dsv41"}}})()
+            self.assertEqual((t.cap("c1"), t.model_id()), (3, model))
 
 
 class Routes(unittest.TestCase):
@@ -300,14 +357,49 @@ class Routes(unittest.TestCase):
         code, body, _ = self.req(*a)
         return code, json.loads(body)
 
+    def test_a_smaller_size_is_chosen_with_no_restart(self):
+        cid = self.ask("POST", "/studio/api/chats", {"kind": "chat", "title": "x"})[1]["id"]
+        own = halo_chat._builtin()["quick-chat"]
+        st = {"connected": "node0", "state": "ready", "profile": dict(own, settings=dict(own["settings"], context=524288))}
+        self.app.cfg["connect"] = "node0"
+        self.app.halod_state = lambda fresh=False: st
+        halo_chat.CONNECTED = lambda: 524288
+        self.addCleanup(setattr, halo_chat, "CONNECTED", None)
+        code, c = self.ask("PUT", f"/studio/api/chats/{cid}", {"model": "quick-chat-128k"})
+        self.assertEqual(code, 200, c)
+        w = self.ask("GET", f"/studio/api/chats/{cid}")[1]["window"]
+        self.assertEqual((w["k"], w["chosen"], w["profile"], w["loaded"], w["loaded_profile"]),
+                         ("128K", 131072, "quick-chat-128k", 131072, "quick-chat-128k"))  # served as it is: no restart offered
+        self.assertEqual(self.ask("PUT", f"/studio/api/chats/{cid}", {"model": halo_chat.SERVER_64K})[0], 200)
+        self.assertEqual(self.ask("GET", f"/studio/api/chats/{cid}")[1]["window"]["k"], "64K")
+        code, c = self.ask("PUT", f"/studio/api/chats/{cid}", {"model": "quick-chat-1m"})
+        self.assertEqual(code, 400)
+        self.assertIn("your server's window", c["error"])
+        self.assertEqual(self.ask("PUT", f"/studio/api/chats/{cid}", {"model": "quick-chat-512k"})[0], 200)
+        st["profile"]["settings"]["context"] = 131072  # the server is started again, smaller
+        halo_chat.CONNECTED = lambda: 131072
+        w = self.ask("GET", f"/studio/api/chats/{cid}")[1]["window"]
+        self.assertEqual((w["k"], w["profile"], w["loaded_profile"]), ("128K", "quick-chat", "quick-chat"))  # its own: no restart
+        self.assertEqual(self.ask("PUT", f"/studio/api/chats/{cid}", {"model": "quick-chat-16k"})[0], 200)
+        w = self.ask("GET", f"/studio/api/chats/{cid}")[1]["window"]
+        self.assertEqual((w["k"], w["profile"], w["loaded_profile"]), ("16K", "quick-chat-16k", "quick-chat-16k"))
+
+    def test_away_from_the_server_the_64k_starts_as_the_64k(self):
+        self.app.halod_state = lambda fresh=False: {"state": "idle"}
+        sent = []
+        self.app.halod_post = lambda path, body=None, *a, **k: (sent.append((path, body)) or (True, {"ok": True}))
+        code, r = self.ask("POST", "/studio/api/chat/model/start", {"profile": halo_chat.SERVER_64K})
+        self.assertEqual(code, 200, r)
+        self.assertEqual(sent, [("/api/start", {"profile": "quick-chat", "replace": False})])
+
     def test_team_and_private_say_so(self):
         cid = self.ask("POST", "/studio/api/chats", {"kind": "chat", "title": "x"})[1]["id"]
         self.assertNotIn("connected", str(self.ask("POST", "/studio/api/chats", {"kind": "chat", "private": True, "title": "x"})[1]))
         self.app.cfg["connect"] = "node0"
         self.assertEqual(self.ask("POST", "/studio/api/chats", {"kind": "chat", "private": True, "title": "x"}), (400, {"error": connect.PRIVATE}))
-        if self.app.studio.get("team") is not None:
-            self.assertEqual(self.ask("PUT", f"/studio/api/chats/{cid}/team", {"cap": 3}), (400, {"error": connect.TEAM}))
-            self.assertEqual(self.ask("PUT", f"/studio/api/chats/{cid}/team", {"cap": 0})[0], 200)  # off is always allowed
+        if self.app.studio.get("team") is not None:  # Team works connected, on the server's streams
+            self.assertEqual(self.ask("PUT", f"/studio/api/chats/{cid}/team", {"cap": 3})[0], 200)
+            self.assertEqual(self.ask("PUT", f"/studio/api/chats/{cid}/team", {"cap": 0})[0], 200)
         self.assertEqual(self.ask("POST", "/studio/api/chats", {"kind": "chat", "title": "y"})[0], 200)
 
 

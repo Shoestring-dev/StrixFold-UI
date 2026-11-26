@@ -610,9 +610,6 @@ def _write(h, method):
                     n = int(b.get("cap"))
                 except (TypeError, ValueError):
                     raise ValueError("cap: a number")
-                if n and (getattr(A, "cfg", None) or {}).get("connect"):
-                    import connect
-                    raise ValueError(connect.TEAM)
                 team.set_cap(parts[1], n)
                 return send_json(h, 200, team.view(parts[1]))
             if parts[3:] == ["stop-all"] and method == "POST":
@@ -655,6 +652,7 @@ def _write(h, method):
             pid = str(b.get("profile") or "")
             if pid not in halo_chat.CHAT_PROFILES:
                 return send_json(h, 400, {"error": "profile: one of the chat models"})
+            pid = halo_chat.profile_of({"model": pid})  # an old or connect-only name: the profile halod knows
             if size_offered(A, pid):
                 return send_json(h, 400, {"error": size_offered(A, pid)})
             chk = switch_check(A, S, pid)
@@ -802,8 +800,12 @@ def window_view(A, S, chat):
         msgs, _ = S["chat_agent"].history(chat, loaded or ctx, cpt)
         use = {"used": halo_chat.est_tokens(msgs, cpt) if len(msgs) > 1 else 0, "context": loaded or ctx, "measured": False}
     m = halo_chat.model_of(chat)
-    k = next((c["k"] for c in m["contexts"] if c["profile"] == pid), f"{round(ctx / 1024)}K")
+    k = next((c["k"] for c in m["contexts"] if c["profile"] == pid and not hs.get("connected")), halo_chat.size_name(ctx))
+    if hs.get("connected"):  # connect.py: any size up to the server's is the one served (no restart)
+        pid = halo_chat.shown_size(pid, int((p.get("settings") or {}).get("context") or halo_chat.context_of(halo_chat.DEFAULT_MODEL)))
+        p = dict(p, id=pid)
     return dict(use, chosen=ctx, k=k, profile=pid, loaded=loaded, loaded_profile=p.get("id") if same else None,
+                connected=bool(hs.get("connected")),
                 compacting=compacting(S, chat["id"]),
                 summaries=sum(1 for x in chat["messages"] if x["role"] == "summary" and not x.get("hidden")))
 
@@ -893,7 +895,7 @@ def switch_check(A, S, profile):
     hs = A.halod_state(fresh=True) or {}
     busy_states = ("ready", "loading", "linking", "waiting")
     loaded = (hs.get("profile") or {}).get("model_id") if hs.get("state") in busy_states else None
-    want = ({p["id"]: p for p in _p.BUILTIN}.get(profile) or {}).get("model_id")
+    want = ({p["id"]: p for p in _p.BUILTIN}.get(halo_chat.LEGACY.get(profile, profile)) or {}).get("model_id")
     name = lambda mid: halo_chat.MODEL_NAMES.get(mid) or mid or "the model"  # noqa: E731
     blockers = []
     comp = sum(1 for k in list(S["relay"].active) if compacting(S, k))

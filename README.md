@@ -85,6 +85,8 @@ What it doesn't protect you from:
 - **Team mode:** a chat's lead model can start several agents that work in parallel on your pairs of boxes, with a
   watcher that stops loops and stalls. The agents run on DeepSeek uncensored with the chat's own tools, so give such a
   chat only what you'd give that model. With one pair of boxes they run when it is idle or already serves that model.
+  Connected to a running StrixFold server (below), they use its model and its free streams, keeping one for your chats,
+  with the same limits.
 - **Steering mid-answer:** a message you send while it works reaches the model at its next step, so the answer keeps its
   reasoning so far. Send now stops the answer and sends yours at once, in Team chats too.
 - **Phone access:** a home-screen app over your tailnet, the same chats as on the Mac.
@@ -156,13 +158,15 @@ ssh gets there by itself and that a StrixFold server answers on that box's 127.0
 port), and says what to do if not. Then it opens the app on it, over one SSH tunnel. Nothing is installed, started or
 stopped on the boxes. `bin/halo-control disconnect` forgets it.
 
-Connected like this, chats, projects, documents, goals and the tools work, with the model and the window the server has.
-Not there: starting or switching models, Team, Private chats and the boxes' readings. Those need the longer set-up.
+Connected like this, chats, projects, documents, goals, Team and the tools work, with the model and the window the
+server has. Not there: starting or switching models, Private chats and the boxes' readings. Those need the longer
+set-up.
 
-StrixFold starts with a window of 8,192 tokens (`CONTEXT` in its `serve.conf`), which is short for chats; the app shows
-the window beside the model. For a longer one, set `CONTEXT=63488` in your `my.conf` on both boxes and start StrixFold
-again (its BUILD_AND_RUN, [Settings that
-matter](https://github.com/Shoestring-dev/StrixFold/blob/main/tools/dsv41-hip/BUILD_AND_RUN.md), says what that needs).
+StrixFold starts with a window of 8,192 tokens (`CONTEXT` in its `serve.conf`), which is short for chats. The sheet
+beside the model lists every size up to the server's own, and a smaller one needs no restart. For a longer window, set
+`CONTEXT` in your copy of `serve.conf` on both boxes and restart StrixFold: up to 65,487 with the inputs as prepared by
+default, more with inputs prepared with more rows (its GETTING-STARTED, [Longer
+context](https://github.com/Shoestring-dev/StrixFold/blob/main/docs/GETTING-STARTED.md#longer-context)).
 
 ## Advanced: let the app run the models
 

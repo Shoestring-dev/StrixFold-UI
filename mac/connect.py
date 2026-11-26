@@ -6,8 +6,8 @@
 HOST is the box that serves (node0), as ssh knows it: a name from ~/.ssh/config or user@address. The app then makes one
 SSH tunnel, to that box's 127.0.0.1:PORT (18080, as StrixFold serves), and reads the server's own /health and
 /v1/models through it. Nothing is installed, started or stopped there. Stand answers on this Mac what halod would (its
-state, the one model), so the rest of the app is as ever; what only halod can do (start, stop, switch, Team's agents,
-Private chats, the boxes' readings) is refused in words.
+state, the one model), so the rest of the app is as ever; what only halod can do (start, stop, switch, Private chats,
+the boxes' readings) is refused in words. Team's agents take the server's free streams, one kept for the chats.
 
 What answers on this Mac's end is believed only while the tunnel itself is up: another program on that port is never
 taken for the server. The server's answers are read by one thread, with a deadline, a size limit and no redirects."""
@@ -27,7 +27,6 @@ HOST = re.compile(r"(?![-.])[A-Za-z0-9_.@-]{1,200}")
 PORT = 18080
 HINT = "Start it on the boxes: first_light.sh up (StrixFold's docs/GETTING-STARTED.md, Serve)."
 NOT_HERE = "The app is connected to a running StrixFold server: start, stop and change it on the boxes, with first_light.sh."
-TEAM = "Team isn't there while the app is connected to a running StrixFold server: its agents need the app's own boxes."
 PRIVATE = "Private chats aren't there while the app is connected to a running StrixFold server: they need boxes pinned in the app's own code."
 EVERY_S, READY_S, STALE_S = 3, 10, 40  # between two looks; once it is ready; a look this old no longer counts
 DEADLINE_S, MAX_BYTES = 5, 64 * 1024

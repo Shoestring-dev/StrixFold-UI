@@ -1411,12 +1411,8 @@
     syncGoal();
     if (AG.open && AG.chat !== C.id) { AG.chat = C.id; showAgent(null); }  // another chat: its agents
     const b = $("t-team"), t = teamOf();
-    let off = !!(C.chat && (C.chat.cousteau || C.chat.private)) || isPriv() || !!((K.state() || {}).llm || {}).connected;  // (connect.py: no agents)
-    // connected to a running server (connect.py): the chip stays, greyed, and says why there is no Team
-    const away = !!((K.state() || {}).llm || {}).connected && !(C.chat && (C.chat.cousteau || C.chat.private)) && !isPriv();
-    b.hidden = off && !away;
-    b.disabled = away;
-    b.title = away ? "Team needs the app's own boxes: it isn't there while the app is connected to a running server" : "";
+    let off = !!(C.chat && (C.chat.cousteau || C.chat.private)) || isPriv();
+    b.hidden = off;
     $("t-team-k").textContent = t.cap ? `Team ${t.cap}` : "Team";
     b.classList.toggle("lv-none", !t.cap);
     b.setAttribute("aria-label", t.cap ? `Team mode: up to ${t.cap} agents. Change` : "Team mode: off. Change");
@@ -2381,7 +2377,8 @@
     } else if (w && w.loaded && cur && w.loaded_profile && w.loaded_profile !== cur.profile) {
       loadSwitch().then((asked) => { if (asked && !$("t-sheet-wrap").hidden && C.view === "context") renderSheet(); });
     }
-    box.appendChild(el("p", "t-sheet-note", "The window is set when the model loads: another size restarts it, about a minute. Replies get a little slower in very long chats."));
+    box.appendChild(el("p", "t-sheet-note", m && m.more ? m.more  // connected to a running server: its own size is the most
+      : "The window is set when the model loads: another size restarts it, about a minute. Replies get a little slower in very long chats."));
   }
   async function chooseSize(c) {
     await choose({ model: c.profile });
