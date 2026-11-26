@@ -188,3 +188,44 @@ body.studio-only .chip-state { max-width: none; }
   padding: 12px 14px; border-radius: 8px; max-width: 46em; overflow-x: auto; }
 .ss-devs .ss-none { color: var(--muted); }
 .ss-devs .ss-acts { display: inline-flex; gap: 16px; grid-row: 1 / span 2; grid-column: 2; align-self: center; }
+
+/* ---- the first screen and the lock, one card: a centred 400 px card on the surface, the mark in a soft tile, a 22
+   px title and one short line, boxed
+   44 px fields with their labels above, a full-width button, Skip below a rule. The Private unlock dialog keeps its own
+   look (dialog.idle-dlg). ---- */
+.s-lock { background: var(--surface, var(--paper)); padding: 48px var(--gutter); }
+.s-lock .s-lock-box { width: min(400px, 100%); gap: 0; text-align: center; background: var(--paper);
+  border: 1px solid var(--ring, var(--faint)); border-radius: 16px; padding: 40px 36px 32px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 12px 32px rgba(0, 0, 0, .06); }
+.s-lock .s-lock-mark { width: 48px; height: 48px; padding: 12px; box-sizing: border-box; margin: 0 auto 20px; border-radius: 12px;
+  background: var(--bubble, var(--faint)); stroke: var(--ink); stroke-width: 2.4; }
+.s-lock.down .s-down-mark { stroke: var(--muted); }
+.s-lock .s-lock-box h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; color: var(--ink);
+  text-wrap: balance; }
+.s-lock .s-lock-box > p:not(.err):not(.s-lock-skip-note) { margin: 8px 0 0; font-size: 15px; line-height: 1.45; color: var(--muted);
+  text-wrap: balance; }
+.s-lock .s-field { margin-top: 24px; gap: 6px; text-align: left; }
+.s-lock .s-field + .s-field { margin-top: 14px; }
+.s-lock .s-field span { font-size: 13px; font-weight: 500; color: var(--ink); }
+.s-lock .s-field input { height: 44px; min-height: 44px; padding: 0 14px; font-size: 16px; color: var(--ink); background: var(--paper);
+  border: 1px solid var(--divider, var(--faint)); border-radius: 10px; box-shadow: none; transition: border-color .15s, box-shadow .15s; }
+.s-lock .s-field input::placeholder { color: var(--muted); opacity: .75; }
+.s-lock .s-field input:hover { border-color: color-mix(in srgb, var(--ink) 28%, transparent); }
+.s-lock .s-field input:focus { outline: none; border-color: var(--focus, #2370cd);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus, #2370cd) 22%, transparent); }
+.s-lock .check-s { margin-top: 14px; align-items: center; text-align: left; font-size: 14px; color: var(--muted); }
+.s-lock .check-s input { margin-top: 0; accent-color: var(--ink); }
+.s-lock .s-lock-box .err { margin: 10px 0 0; font-size: 14px; text-align: left; }
+.s-lock .s-lock-box .err:empty { display: none; }
+.s-lock .s-lock-box .go.solid, .s-lock .s-lock-link { align-self: stretch; display: inline-flex; align-items: center; justify-content: center;
+  height: 44px; min-height: 44px; margin-top: 20px; padding: 0 20px; border-radius: 10px; font-size: 15px; font-weight: 600; }
+.s-lock .s-lock-skip { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--divider, var(--faint)); }
+.s-lock .s-lock-skip .textbtn { min-height: 32px; font-size: 14px; font-weight: 500; color: var(--ink); }
+.s-lock .s-lock-skip-note { margin: 2px auto 0; max-width: none; font-size: 13px; line-height: 1.4; color: var(--muted); text-wrap: balance; }
+/* while it shows, nothing else of the app does: no sidebar, top bar or menu to reach for before it opens */
+.app:has(#s-lock:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
+.app:has(#s-lock:not([hidden])) :is(#side, .topbar, #scrim) { display: none !important; }
+@media (max-width: 480px) {
+  .s-lock { padding: 24px 16px; }
+  .s-lock .s-lock-box { padding: 32px 22px 24px; border-radius: 14px; }
+}

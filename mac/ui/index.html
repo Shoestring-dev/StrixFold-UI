@@ -128,14 +128,14 @@
     <h1 id="s-lock-h">StrixFold UI is locked</h1>
     <p id="s-lock-p">Enter the passcode to see your chats.</p>
     <label class="s-field"><span id="s-lock-l1">Passcode</span><input type="password" id="s-lock-pass" autocomplete="current-password" required minlength="6"></label>
-    <label class="s-field" id="s-lock-again-w" hidden><span>Passcode again</span><input type="password" id="s-lock-again" autocomplete="new-password" minlength="6"></label>
-    <label class="check-s" id="s-lock-rem-w"><input type="checkbox" id="s-lock-rem" checked> <span>Remember this device for 90 days</span></label>
-    <a class="go solid s-lock-link" id="s-lock-link" href="#" hidden>Open StrixFold UI on the tailnet</a>
+    <label class="s-field" id="s-lock-again-w" hidden><span>Confirm passcode</span><input type="password" id="s-lock-again" autocomplete="new-password" minlength="6"></label>
     <p class="err" id="s-lock-err" aria-live="assertive"></p>
+    <label class="check-s" id="s-lock-rem-w"><input type="checkbox" id="s-lock-rem" checked> <span>Remember this device</span></label>
+    <a class="go solid s-lock-link" id="s-lock-link" href="#" hidden>Open StrixFold UI on the tailnet</a>
     <button type="submit" class="go solid" id="s-lock-go">Unlock</button>
     <div class="s-lock-skip" id="s-lock-skip-w" hidden>
       <button type="button" class="textbtn" id="s-lock-skip">Skip for now</button>
-      <p class="s-lock-skip-note" id="s-lock-skip-note">Without a passcode, anything running as your Mac account can open your chats; other accounts on this Mac can't. Private chats and your phone still need one, and you can add it in Settings.</p>
+      <p class="s-lock-skip-note" id="s-lock-skip-note">Anyone using this Mac account can open your chats.</p>
     </div>
   </form>
 </div>

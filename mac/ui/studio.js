@@ -82,7 +82,7 @@
       $("s-lock-err").textContent = "";
       $("s-lock-link").hidden = true;
       $("s-lock-h").textContent = "Can't reach StrixFold UI";
-      $("s-lock-p").textContent = "The Mac's StrixFold UI isn't answering. This page tries again by itself every few seconds.";
+      $("s-lock-p").textContent = "Trying again every few seconds.";
       $("s-lock-form").classList.add("noform");
       clearTimeout(showLock.again);
       // under the idle lock a reload only locks again (theme.js), so the passcode form shows in place
@@ -95,7 +95,7 @@
     if (a.skipped && a.local && !a.unlocked) {  // this tab has no key (or its cookie didn't stay): how to get in
       $("s-lock").hidden = false; hidePages();
       $("s-lock-h").textContent = "Open StrixFold UI from this Mac";
-      $("s-lock-p").textContent = "It has no passcode, so only a page opened with bin/halo-control gets in. Run bin/halo-control on this Mac (or allow cookies for 127.0.0.1 here), then reload; or set a passcode in Settings from a page that is open.";
+      $("s-lock-p").textContent = "Run bin/halo-control on this Mac, then reload.";
       $("s-lock-form").classList.add("noform"); if ($("s-lock-skip-w")) $("s-lock-skip-w").hidden = true;
       return;
     }
@@ -108,10 +108,8 @@
     $("s-lock-link").hidden = true;
     if ($("s-lock-skip-w")) $("s-lock-skip-w").hidden = !(setup && a.local && !a.https_only);
     if (a.https_only) {  // plain HTTP from the home network: it opens only over HTTPS on the tailnet
-      $("s-lock-h").textContent = "StrixFold UI opens over your tailnet";
-      $("s-lock-p").textContent = a.url && a.tailnet_ready
-        ? "On the home network StrixFold UI needs HTTPS, so your phone and other devices open it through Tailscale."
-        : "On the home network StrixFold UI needs HTTPS through Tailscale, which is not switched on yet. Use StrixFold UI on the Mac for now.";
+      $("s-lock-h").textContent = "Open Studio over your tailnet";
+      $("s-lock-p").textContent = a.url && a.tailnet_ready ? "This network needs HTTPS." : "Turn on Tailscale on the Mac first.";
       if (a.url && a.tailnet_ready) {
         $("s-lock-link").href = a.url;
         $("s-lock-link").textContent = `Open ${a.url.replace("https://", "").replace(/\/#\/.*$/, "")}`; $("s-lock-link").hidden = false;
@@ -121,17 +119,18 @@
     }
     if (setup && !a.local) {
       $("s-lock-h").textContent = "Set the passcode on the Mac";
-      $("s-lock-p").textContent = "StrixFold UI needs a passcode before it opens anywhere else. Open StrixFold UI on the Mac itself and set one there.";
+      $("s-lock-p").textContent = "Then sign in here.";
       $("s-lock-form").classList.add("noform");
     } else {
       $("s-lock-form").classList.remove("noform");
-      $("s-lock-h").textContent = setup ? "Choose a passcode for StrixFold UI" : "StrixFold UI is locked";
+      $("s-lock-h").textContent = setup ? "Set a passcode" : "StrixFold UI is locked";
       $("s-lock-p").textContent =
-        setup ? "Your chats stay private on this Mac. The passcode opens them here and on your phone; at least 6 characters."
-        : IDLE.on ? `Locked after ${IDLE.min || "a few"} minute${IDLE.min === 1 ? "" : "s"} with no input on this Mac. Enter the passcode to carry on where you were.`
-        : `Enter the passcode to see your ${KEPT}.`;
+        setup ? "It locks your chats on this Mac and your phone."
+        : IDLE.on ? `Locked after ${IDLE.min || "a few"} minute${IDLE.min === 1 ? "" : "s"} idle.`
+        : "Enter your passcode.";
       if (IDLE.on) $("s-lock-rem").checked = IDLE.remember !== false;
-      $("s-lock-l1").textContent = setup ? "New passcode" : "Passcode";
+      $("s-lock-l1").textContent = "Passcode";
+      $("s-lock-pass").placeholder = setup ? "At least 6 characters" : "";
       $("s-lock-go").textContent = setup ? "Set passcode" : "Unlock";
       setTimeout(() => $("s-lock-pass").focus(), 50);
     }

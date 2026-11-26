@@ -206,6 +206,16 @@ class Sizes(Base):
         self.assertIsNone(halo_chat.models({"state": "ready", "profile": {"model_id": "dsv41"}})["models"][0].get("more"))
 
 
+class ServedLabels(Base):
+    def test_what_strixfold_serves_is_labelled_as_its_context(self):
+        """/health says CONTEXT in whole 2,048-token chunks less 18: a 64K server is 63,470, and reads 64K, once."""
+        halo_chat.CONNECTED = self.stand.window
+        for served, k in ((8174, "8K"), (16366, "16K"), (63470, "64K"), (131054, "128K"), (524270, "512K"), (1046510, "1M")):
+            Engine.health = dict(HEALTH, context_length=served)
+            ks = [c["k"] for c in halo_chat.models(self.look())["models"][0]["contexts"]]
+            self.assertEqual((ks[-1], ks.count(k)), (k, 1), served)
+
+
 class Wrong(Base):
     def test_only_the_tunnels_own_end_is_believed(self):
         for state, error, words in (("blocked", None, "in use by another program"), ("down", "Connection refused", "Connection refused"), ("starting", None, "Connecting"),

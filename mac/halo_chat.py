@@ -386,7 +386,8 @@ MORE = "For more, raise CONTEXT in my.conf on both boxes, then restart."  # (the
 
 
 def size_name(n):
-    return "64K" if n == 63488 else f"{round(n / 1e6)}M" if n >= 1_000_000 else f"{round(n / 1024)}K"
+    # 64K is 63,488 here; StrixFold serves CONTEXT in whole 2,048-token chunks less 18 (63,470 for it, or for 65,487)
+    return "64K" if 62_464 < n <= 65_536 else f"{round(n / 1e6)}M" if n >= 1_000_000 else f"{round(n / 1024)}K"
 
 
 def context_of(profile_id):

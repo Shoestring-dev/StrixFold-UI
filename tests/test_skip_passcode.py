@@ -186,7 +186,7 @@ class Page(unittest.TestCase):
         html = open(os.path.join(ROOT, "mac", "ui", "index.html")).read()
         js = open(os.path.join(ROOT, "mac", "ui", "studio.js")).read()
         self.assertIn('id="s-lock-skip"', html)
-        self.assertIn("anything running as your Mac account can open your chats; other accounts on this Mac can't", html)
+        self.assertIn("Anyone using this Mac account can open your chats.", html)  # its one line
         self.assertIn('$("s-lock-skip-w").hidden = !(setup && a.local && !a.https_only)', js)
         self.assertIn('"/studio/api/auth/skip", { key }', js)
         self.assertIn("showLock.tried", js)  # once per page, never round and round
