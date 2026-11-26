@@ -79,7 +79,7 @@ class DirectTests(unittest.TestCase):
         import base64
         command = """printf '%s\\n' "a'b\\"c $HOME"; exit 3"""
         argv = D.argv_for('vps', command, 7)
-        self.assertEqual(argv[:7], ['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', 'vps-desktop'])
+        self.assertEqual(argv[:7 + len(D.SSH_SAFE)], ['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', *D.SSH_SAFE, 'vps-desktop'])
         self.assertNotIn(command, argv[-1])
         encoded = argv[-1].split('printf %s ')[1].split(' |')[0]
         script = base64.b64decode(encoded).decode()
@@ -97,10 +97,10 @@ class DirectTests(unittest.TestCase):
     def test_a_computer_without_an_ssh_config_entry_brings_its_own_options(self):
         # a second VPS: no ~/.ssh/config alias, so key and known_hosts come from its target
         argv = D.argv_for('vps2', 'uptime', 5)
-        self.assertEqual(argv[:11], ['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'IdentityFile=/tmp/id_test',
+        self.assertEqual(argv[:11 + len(D.SSH_SAFE)], ['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', *D.SSH_SAFE, '-o', 'IdentityFile=/tmp/id_test',
                                      '-o', 'UserKnownHostsFile=/tmp/known_hosts_test', 'ubuntu@192.0.2.10'])
         self.assertTrue(argv[-1].startswith('exec bash -c '))
-        self.assertEqual(D.argv_for('vps', 'uptime', 5)[6], 'vps-desktop')  # an alias's options stay in ~/.ssh/config
+        self.assertEqual(D.argv_for('vps', 'uptime', 5)[6 + len(D.SSH_SAFE)], 'vps-desktop')  # an alias's options stay in ~/.ssh/config
         self.assertIn({'id': 'vps2', 'name': 'VPS 2', 'available': True}, D.targets())
 
     def test_no_approval_prompt_and_selected_host(self):

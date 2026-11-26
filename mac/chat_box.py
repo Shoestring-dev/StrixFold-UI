@@ -525,15 +525,13 @@ class BoxTools(T.Toolset):
             return T.result(f"The command didn't run: {why}", f"{head} · didn't run", "failed" if r.get("lost") else "refused",
                             "refused" if r.get("refused") else "ran", secs=secs, out=text, refused=refused)
         k = r.get("killed")
-        tail = text[-T.OUT_MODEL:]
-        cut = f"(the first {len(text) - len(tail):,} characters left out)\n" if len(tail) < len(text) else ""
         state = f"exit {r.get('exit')}" if not k else killed_words(k, timeout)
         if r.get("unsaved"):
             state += "; what it changed in the folder wasn't kept"
-        model = (r["note"] + "\n" if r.get("note") else "") + f"{state}\n" + untrusted(f"output of: {clip(cmd, 200)}",
-                                                                                          cut + tail if text else "(no output)")
-        if refused:
-            model += "\nThe network filter refused: " + "; ".join(refused[:5])
+        pre = (r["note"] + "\n" if r.get("note") else "") + f"{state}\n"
+        post = "\nThe network filter refused: " + "; ".join(refused[:5]) if refused else ""
+        src = f"output of: {clip(cmd, 200)}"  # the output gets what the words around it leave of the cap: cut once
+        model = pre + untrusted(src, T.ends(text, max(400, T.OUT_MODEL - len(pre + untrusted(src, "") + post))) if text else "(no output)") + post
         return T.result(model, f"{head} · {state} · {r.get('secs') if r.get('secs') is not None else secs} s",
                         "stopped" if k == "stop" else "ok", exit=r.get("exit"), secs=r.get("secs") or secs, out=text,
                         refused=refused, killed=k)

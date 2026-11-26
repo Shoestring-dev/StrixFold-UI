@@ -177,3 +177,14 @@ body.studio-only .chip-state { max-width: none; }
 
 .s-lock-box .err { color: var(--signal); }  /* a wrong passcode in the error colour */
 
+
+/* the first screen's Skip for now, under the passcode form */
+.s-lock-skip { margin-top: 14px; text-align: center; }
+.s-lock-skip .textbtn { font-size: var(--fs-small, 13px); }
+.s-lock-skip-note { margin: 6px auto 0; max-width: 34ch; font-size: var(--fs-small, 13px); color: var(--muted, #666); }
+
+/* Settings' computers for Direct access: the key steps when ssh can't log in by itself */
+.ss-help { white-space: pre-wrap; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--paper-2, rgba(127,127,127,.08));
+  padding: 12px 14px; border-radius: 8px; max-width: 46em; overflow-x: auto; }
+.ss-devs .ss-none { color: var(--muted); }
+.ss-devs .ss-acts { display: inline-flex; gap: 16px; grid-row: 1 / span 2; grid-column: 2; align-self: center; }

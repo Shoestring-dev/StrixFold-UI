@@ -1358,6 +1358,43 @@ def pid_file(fake, argv):
     return None if fake or "--port" in argv else PID_FILE
 
 
+def open_dir():
+    """This Mac account's own cache folder outside the home folder (/var/folders/.../C, 0700): a VM or container given the
+    home folder doesn't see it. ~/Library/Caches where macOS doesn't name one."""
+    try:
+        d = subprocess.run(["/usr/bin/getconf", "DARWIN_USER_CACHE_DIR"], capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        d = ""
+    return os.path.join(d if d.startswith("/") else os.path.expanduser("~/Library/Caches"), "halo-control")
+
+
+def write_open_key(A, port):
+    """A new key, and a page that opens the app with it, readable by this Mac account only (0600, outside the home
+    folder): the first passcode and the first screen's Skip need it, so another account on this Mac, which reaches
+    127.0.0.1 too, can do neither. bin/halo-control opens the page, so the key is never in a command line `ps` shows
+    other accounts. Made at start and again after each Skip (a copy in the browser's history is then dead). If it can't
+    be written, nobody can set the first passcode or skip until it can: the log and the page say so."""
+    A.open_key = secrets.token_urlsafe(24)
+    where = getattr(A, "fake_root", None) if A.fake else open_dir()  # a fake app's in its own folder (tests, previews)
+    if not where:
+        return
+    page = (f'<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=http://127.0.0.1:{port}/#k={A.open_key}">'
+            f'<title>StrixFold UI</title><p><a href="http://127.0.0.1:{port}/#k={A.open_key}">Open</a></p>\n')
+    p = os.path.join(where, f"open-{port}.html")
+    tmp = p + ".new"
+    try:
+        os.makedirs(where, mode=0o700, exist_ok=True)
+        if os.path.lexists(tmp):
+            os.unlink(tmp)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(page)
+        os.replace(tmp, p)
+    except OSError as e:
+        log(f"the page that opens the app with its key couldn't be written ({type(e).__name__}): the first passcode "
+            f"and Skip wait until it can ({p})")
+
+
 def write_pid(path):
     if not path:
         return
@@ -1410,6 +1447,7 @@ def serve(argv):
     srv.daemon_threads = True
     A.start()
     write_pid(pid_file(fake, argv))
+    write_open_key(A, cfg["ui_port"])
     log(f"halo-control {VERSION} on http://127.0.0.1:{cfg['ui_port']}/{' (fake backend)' if fake else ''}")
     if cfg.get("lan"):
         log("home network: " + ", ".join(f"http://{n}:{cfg['ui_port']}/" for n in sorted(lan_names()))

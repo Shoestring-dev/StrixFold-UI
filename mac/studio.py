@@ -1024,16 +1024,45 @@ class Auth:
     def is_set(self):
         return bool(self.s.kv("passcode"))
 
+    def skipped(self):
+        """No passcode, by the user's choice on the first screen: this Mac's browsers open the app without one."""
+        return not self.is_set() and bool(self.s.kv("passcode_skipped"))
+
+    def skip(self, local, key_ok, label, client, old_token=None):
+        """Open without a passcode: on this Mac only, and only for a page opened with this run's key, which only this Mac
+        account can read (halo_control.write_open_key). Private chats, the phone and the idle lock still need one. A
+        device session for it, made under the same lock as setup's, so the two can't cross."""
+        with self.mu:
+            if self.is_set():
+                raise PermissionError("a passcode is set already")
+            if not local:
+                raise PermissionError("skipping the passcode is for this Mac only (http://127.0.0.1:8711/)")
+            if not key_ok:
+                raise PermissionError("open StrixFold UI with bin/halo-control on this Mac to skip the passcode")
+            if not self.s.kv("passcode_skipped"):
+                self.s.set_kv("passcode_skipped", {"t": now()})
+            return self.new_session(True, label, client, old_token)
+
     @staticmethod
     def _hash(passcode, salt, rounds=PBKDF2_ROUNDS):
         return hashlib.pbkdf2_hmac("sha256", passcode.encode(), bytes.fromhex(salt), rounds).hex()
 
-    def setup(self, passcode, local):
-        if self.is_set():
-            raise PermissionError("a passcode is set already; change it in Settings")
-        if not local:
-            raise PermissionError("set the passcode on this Mac (http://127.0.0.1:8711/) first")
-        self._store(passcode)
+    def setup(self, passcode, local, signed_in=False, key_ok=True):
+        """The first passcode: from a page opened with this run's key (key_ok, from the routes), or after a Skip from a
+        page that is signed in (Settings), so another account or another page can't set one and lock the user out;
+        every session made before it ends."""
+        with self.mu:
+            if self.is_set():
+                raise PermissionError("a passcode is set already; change it in Settings")
+            if not local:
+                raise PermissionError("set the passcode on this Mac (http://127.0.0.1:8711/) first")
+            if self.s.kv("passcode_skipped") and not signed_in:
+                raise PermissionError("set the passcode in Settings, on a page that is open")
+            if not signed_in and not key_ok:
+                raise PermissionError("open StrixFold UI with bin/halo-control on this Mac to set the passcode")
+            self._store(passcode)
+            self.s.x("DELETE FROM kv WHERE k=?", ("passcode_skipped",))
+            self.s.x("DELETE FROM devices")
 
     def strengthen(self, passcode, rounds=1_000_000):
         """The passcode's check at `rounds` (Private's first unlock: a copied store can't test guesses against a cheaper
@@ -1068,7 +1097,7 @@ class Auth:
                 raise PermissionError(f"too many wrong passcodes: try again in {int(until - t) + 1} s")
         rec = self.s.kv("passcode")
         if not rec:
-            raise PermissionError("no passcode is set yet")
+            raise PermissionError("no passcode is set yet: set one in Settings first")
         ok = hmac.compare_digest(self._hash(str(passcode or ""), rec["salt"], rec.get("rounds", PBKDF2_ROUNDS)), rec["hash"])
         with self.mu:
             if ok:

@@ -562,6 +562,25 @@ class TurnCompaction(unittest.TestCase):
         self.assertTrue(first["content"].endswith(halo_chat.STEER_IN + said + halo_chat.STEER_OUT))
         self.assertLess(len(first["content"]), 40_000)  # the output itself was shortened
 
+    def test_an_older_steps_summary_keeps_the_end_of_its_output(self):
+        msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "Run the tests."}]
+        for i in range(halo_chat.KEEP_STEPS + 2):
+            msgs.append({"role": "assistant", "content": f"Step {i}.", "tool_calls": [
+                {"id": f"c{i}", "type": "function", "function": {"name": "run_command", "arguments": "{}"}}]})
+            msgs.append({"role": "tool", "tool_call_id": f"c{i}", "content": f"START {i}\n" + "ok\n" * 20_000 + f"1 failed in step {i}"})
+        seen = {}
+
+        def summarise(endpoint, model, sys_, lines, budget, chat_id, stop, system=None):
+            seen["lines"] = lines
+            return "SUMMARY"
+        self.agent._summarise = summarise
+        self.agent._compact_turn(self.chat["id"], "http://127.0.0.1:9/v1", "m", CTX, 4, list(msgs), 2, None)
+        results = [x for x in seen["lines"] if x.startswith("Result: ")]
+        self.assertTrue(results)
+        for x in results:
+            self.assertIn("START", x)
+            self.assertRegex(x, r"1 failed in step \d+$")
+
     def test_a_page_cannot_pass_its_words_off_as_owners(self):
         """Only the frames the loop wrote are read back as the user's words: their tag is new each start, so text in a tool's
         output that copies the frame's wording is left where it is."""

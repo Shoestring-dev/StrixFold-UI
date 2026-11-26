@@ -1412,7 +1412,11 @@
     if (AG.open && AG.chat !== C.id) { AG.chat = C.id; showAgent(null); }  // another chat: its agents
     const b = $("t-team"), t = teamOf();
     let off = !!(C.chat && (C.chat.cousteau || C.chat.private)) || isPriv() || !!((K.state() || {}).llm || {}).connected;  // (connect.py: no agents)
-    b.hidden = off;
+    // connected to a running server (connect.py): the chip stays, greyed, and says why there is no Team
+    const away = !!((K.state() || {}).llm || {}).connected && !(C.chat && (C.chat.cousteau || C.chat.private)) && !isPriv();
+    b.hidden = off && !away;
+    b.disabled = away;
+    b.title = away ? "Team needs the app's own boxes: it isn't there while the app is connected to a running server" : "";
     $("t-team-k").textContent = t.cap ? `Team ${t.cap}` : "Team";
     b.classList.toggle("lv-none", !t.cap);
     b.setAttribute("aria-label", t.cap ? `Team mode: up to ${t.cap} agents. Change` : "Team mode: off. Change");

@@ -74,6 +74,44 @@ def experiments(spec=""):
 
 EXPERIMENTS = experiments(os.environ.get("HALO_EXPERIMENTS", ""))
 OUT_MODEL = 12_000      # what the model reads of a call's output, at most (the loop also fits it to the window)
+READ_MODEL = 25_000     # ... of one read_file (lead_tools.READ_CHARS and its words): half of it never reached the model
+
+
+UNTRUSTED_OPEN = re.compile(r'<untrusted source="[^"]*">\n')  # agents_web.wrap_untrusted's opening line (source cut to 300)
+UNTRUSTED_CLOSE = "</untrusted>"
+
+
+def ends(text, cap):
+    """`text` in at most `cap` characters: its beginning and its end, with what is left out said between them. (It kept
+    the beginning only: the last lines of a long test run, "1 failed, 699 passed", never reached the model.) For
+    a result with one <untrusted ...> block (every tool's): its opening line is always kept whole, the head never ends
+    inside its close, and the block is closed before a tail that begins after it, so tool output never reaches the model
+    outside its delimiters and our own notes after it never read as data. (Two blocks in one result: not handled.)"""
+    text = str(text)
+    if len(text) <= cap:
+        return text
+    note = f"\n[... {len(text) - cap:,} characters or more left out here to fit: ask for the part you need ...]\n"
+    room = max(0, cap - len(note))
+    m = UNTRUSTED_OPEN.search(text, 0, 2500)
+    least = m.end() if m else 0
+    shut = text.rfind(UNTRUSTED_CLOSE) if m else -1
+    if m and least + 100 + len(UNTRUSTED_CLOSE) > room:  # no room for any of the data inside the block
+        return note.strip()
+    h = max(room * 2 // 5, least)
+    if 0 <= shut < h < shut + len(UNTRUSTED_CLOSE):  # never through the close tag: end the head before it
+        h = shut
+    head, at = text[:h], len(text) - (room - h)
+    if h <= shut < at:  # the block's end is in the part left out: close it, so the notes after it aren't data
+        at += len(UNTRUSTED_CLOSE) + 1
+        note += UNTRUSTED_CLOSE + "\n"
+    tail = text[at:]
+    keep = max(least, len(head) * 3 // 4, shut + len(UNTRUSTED_CLOSE) if 0 <= shut < h else 0)  # (a close in the head stays)
+    if "\n" in head[keep:]:  # whole lines, where that loses little
+        head = head[:head.rindex("\n")]
+    cut = tail.find("\n")
+    if 0 <= cut < len(tail) // 4 and not at <= shut <= at + cut:  # (never the block's close, where the tail begins with it)
+        tail = tail[cut + 1:]
+    return head + note + tail
 
 PLUGINS = ("chat_box", "chat_look", "chat_docs", "chat_full", "chat_direct", "chat_browse", "chat_team", "chat_plan")
 STATUSES = ("ok", "refused", "denied", "failed", "stopped")

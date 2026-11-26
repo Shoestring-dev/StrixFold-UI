@@ -432,6 +432,47 @@ class Team(unittest.TestCase):
             {"id": "c", "type": "function", "function": {"name": "run_command", "arguments": json.dumps({"command": command})}}]}}],
             "usage": {"completion_tokens": 4}}
 
+    def test_a_growing_log_polled_with_one_command_is_not_a_loop(self):
+        """The watcher compared the first 2,000 characters of a result: a log that grows begins the same each time, so
+        polling it said "looping" at 3 and stopped the agent at 5 (review)."""
+        n = {"k": 0}
+
+        class Log(FakeTools):
+            def call(self, name, args, ctx):
+                n["k"] += 1
+                return T.result("started\n" + "".join(f"epoch {i} running\n" for i in range(400 + 50 * n["k"])), "ran")
+        self.team.toolsets = lambda ctx: [Log(ctx, self.calls)]
+        self._agent_model(lambda k, msgs: self._tool_reply("cat train.log") if k <= CT.LOOP_STOP + 2 else
+                          {"choices": [{"message": {"content": "done"}}], "usage": {"completion_tokens": 2}})
+        self.team.set_cap(self.cid, 2)
+        self.team.spawn(self.cid, "box", {}, "x", "poll")
+        self.wait(lambda: self.team.view(self.cid)["agents"][0]["status"] not in CT.LIVE)
+        d = self.team.detail(self.cid, "a1")
+        self.assertEqual(d["calls"], CT.LOOP_STOP + 2)
+        self.assertNotEqual(d["health"]["state"], "looping")
+        self.assertNotIn("watcher wrapped it up", d.get("error") or "")
+
+    def test_two_reads_in_one_step_each_get_the_usual_share(self):
+        class Reads(FakeTools):
+            def specs(self):
+                return [{"type": "function", "function": {"name": "read_file", "parameters": {}}}]
+
+            def call(self, name, args, ctx):
+                return T.result(f"{args.get('path')} " + "r" * 30_000 + " END", "ran")
+        self.team.toolsets = lambda ctx: [Reads(ctx, self.calls)]
+        reads = {"choices": [{"message": {"content": "", "tool_calls": [
+            {"id": f"r{i}", "type": "function", "function": {"name": "read_file", "arguments": json.dumps({"path": f"f{i}"})}}
+            for i in (1, 2)]}}], "usage": {"completion_tokens": 4}}
+        m = self._agent_model(lambda k, msgs: reads if k == 1 else {"choices": [{"message": {"content": "done"}}], "usage": {"completion_tokens": 2}})
+        self.team.set_cap(self.cid, 2)
+        self.team.spawn(self.cid, "box", {}, "x", "read two")
+        self.wait(lambda: self.team.view(self.cid)["agents"][0]["status"] not in CT.LIVE)
+        shown = [x["content"] for x in m["seen"][1] if x["role"] == "tool"]
+        self.assertEqual(len(shown), 2)
+        for x in shown:
+            self.assertLessEqual(len(x), T.OUT_MODEL)
+            self.assertTrue(x.endswith(" END"))
+
     def test_watcher_wraps_up_a_loop(self):
         self.team.set_cap(self.cid, 2)
         m = self._agent_model(lambda n, msgs: self._tool_reply("same thing"))

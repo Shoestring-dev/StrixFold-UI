@@ -261,6 +261,7 @@ class Http(unittest.TestCase):
         # no live port anywhere: the endpoint tunnels and halod of the real dashboard are never reached from here
         cfg = dict(HC.DEFAULTS, ui_port=0, halod_local_port=1, endpoint_local_port=9, endpoint2_local_port=9)
         self.app = HC.App(cfg)
+        self.app.open_key = "test-open-key-0123456789abcdef"  # what serve() makes (halo_control.write_open_key)
         self.app.local_endpoint = lambda st=None: "http://127.0.0.1:9/v1"
         self.app.relay = chats.Relay()
         self.app.runner = None
@@ -300,7 +301,7 @@ class Http(unittest.TestCase):
             return e.code, e.read(), e.headers
 
     def unlock(self):
-        code, body, h = self.req("POST", "/studio/api/auth/setup", {"passcode": "correct horse"})
+        code, body, h = self.req("POST", "/studio/api/auth/setup", {"passcode": "correct horse", "key": self.app.open_key})
         self.assertEqual(code, 200, body)
         self.cookie = h["Set-Cookie"].split(";")[0].split("=", 1)[1]
         self.assertIn("HttpOnly", h["Set-Cookie"])

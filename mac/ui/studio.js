@@ -91,6 +91,14 @@
     }
     const a = S.auth;
     const setup = !a.set;
+    if (a.skipped && a.local && !a.unlocked && !showLock.tried) { skipPasscode(); return; }  // skipped: no form, a session at once
+    if (a.skipped && a.local && !a.unlocked) {  // this tab has no key (or its cookie didn't stay): how to get in
+      $("s-lock").hidden = false; hidePages();
+      $("s-lock-h").textContent = "Open StrixFold UI from this Mac";
+      $("s-lock-p").textContent = "It has no passcode, so only a page opened with bin/halo-control gets in. Run bin/halo-control on this Mac (or allow cookies for 127.0.0.1 here), then reload; or set a passcode in Settings from a page that is open.";
+      $("s-lock-form").classList.add("noform"); if ($("s-lock-skip-w")) $("s-lock-skip-w").hidden = true;
+      return;
+    }
     $("s-lock").hidden = false;
     hidePages();
     $("s-lock-err").textContent = "";
@@ -98,6 +106,7 @@
     $("s-lock-rem-w").hidden = setup;
     $("s-lock-pass").autocomplete = setup ? "new-password" : "current-password";
     $("s-lock-link").hidden = true;
+    if ($("s-lock-skip-w")) $("s-lock-skip-w").hidden = !(setup && a.local && !a.https_only);
     if (a.https_only) {  // plain HTTP from the home network: it opens only over HTTPS on the tailnet
       $("s-lock-h").textContent = "StrixFold UI opens over your tailnet";
       $("s-lock-p").textContent = a.url && a.tailnet_ready
@@ -127,13 +136,30 @@
       setTimeout(() => $("s-lock-pass").focus(), 50);
     }
   }
+  // the first screen's Skip: no passcode on this Mac (studio.Auth.skip); the page opens as after a passcode
+  async function skipPasscode() {
+    showLock.tried = true;  // once per page: never round and round (a browser that drops the cookie)
+    let key = "";
+    try { key = sessionStorage.getItem("halo.open-key") || ""; } catch (e) { key = ""; }
+    try { await call("POST", "/studio/api/auth/skip", { key }); } catch (err) {
+      showLock(); $("s-lock-err").textContent = err.message; return;
+    }
+    if (!(await checkAuth())) {
+      showLock(); $("s-lock-err").textContent = "This browser didn't keep the sign-in. Allow cookies for 127.0.0.1, then reload."; return;
+    }
+    $("s-lock").hidden = true;
+    route(S.page, S.want, true);
+  }
+  if ($("s-lock-skip")) $("s-lock-skip").addEventListener("click", skipPasscode);
   $("s-lock-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const a = S.auth || {}, pass = $("s-lock-pass").value;
     $("s-lock-err").textContent = "";
     if (!a.set && pass !== $("s-lock-again").value) { $("s-lock-err").textContent = "The two passcodes differ."; return; }
     try {
-      await call("POST", a.set ? "/studio/api/auth/unlock" : "/studio/api/auth/setup", { passcode: pass, remember: $("s-lock-rem").checked });
+      let key = "";
+      try { key = sessionStorage.getItem("halo.open-key") || ""; } catch (e2) { key = ""; }
+      await call("POST", a.set ? "/studio/api/auth/unlock" : "/studio/api/auth/setup", { passcode: pass, remember: $("s-lock-rem").checked, key });
     } catch (err) {  // said again each time, so a screen reader hears a second wrong try too
       $("s-lock-err").textContent = ""; setTimeout(() => { $("s-lock-err").textContent = err.message; }, 60); $("s-lock-pass").select(); return;
     }
@@ -797,6 +823,55 @@
 
 
   // ---------------------------------------------------------------- Settings
+  // Settings' computers for Direct access (direct_setup.py): this Mac only. Added only after a connection test passes;
+  // the test says in words what is wrong, and how to give the computer a key of its own when ssh can't log in by itself.
+  async function directSection(host) {
+    const list = el("ul", "ss-devs"), say = el("p", "ss-p"), help = el("pre", "ss-help"); help.hidden = true;
+    const draw = (cs) => {
+      list.replaceChildren();
+      for (const c of cs) {
+        const li = el("li");
+        li.appendChild(el("span", "", c.name));
+        li.appendChild(el("small", "", `${c.host} · ${c.shell}${c.note ? ` · ${c.note}` : ""}`));
+        const t = el("button", "textbtn", "Test"); t.type = "button"; t.setAttribute("aria-label", `Test ${c.name}`);
+        t.addEventListener("click", async () => { say.textContent = `Testing ${c.name}…`; help.hidden = true;
+          try { const r = await call("POST", "/studio/api/direct/test", { id: c.id }); say.textContent = r.words; if (r.help) { help.textContent = r.help; help.hidden = false; } }
+          catch (e) { say.textContent = e.message; } });
+        const acts = el("span", "ss-acts"); acts.appendChild(t);
+        if (c.mine) {
+          const rm = el("button", "textbtn danger", "Remove"); rm.type = "button"; rm.setAttribute("aria-label", `Remove ${c.name}`);
+          rm.addEventListener("click", async () => { try { draw((await call("DELETE", `/studio/api/direct/${encodeURIComponent(c.id)}`)).computers); say.textContent = `${c.name} removed.`; } catch (e) { say.textContent = e.message; } });
+          acts.appendChild(rm);
+        }
+        li.appendChild(acts);
+        list.appendChild(li);
+      }
+      if (!cs.length) list.appendChild(el("li", "ss-none", "None yet."));
+    };
+    host.appendChild(list);
+    const f = el("form", "ss-pass"); f.noValidate = true;
+    f.appendChild(el("h3", "", "Add a computer"));
+    const field = (label, input) => { const l = el("label", "s-field"); l.appendChild(el("span", "", label)); l.appendChild(input); f.appendChild(l); return input; };
+    const nm = field("Name", Object.assign(el("input"), { placeholder: "Lab PC", maxLength: 40 }));
+    const hs = field("ssh name or user@address", Object.assign(el("input"), { placeholder: "lab or agent@192.168.1.20", autocapitalize: "off", spellcheck: false }));
+    const sh = el("select"); for (const v of ["bash", "PowerShell"]) sh.appendChild(Object.assign(el("option", "", v), { value: v }));
+    field("Shell", sh);
+    const nt = field("Note for the model (optional)", Object.assign(el("input"), { placeholder: "Ubuntu, 4 GB of RAM: keep jobs light.", maxLength: 300 }));
+    const pc = S.auth && S.auth.set ? field("Your passcode (adding a computer gives the model a shell there)", Object.assign(el("input"), { type: "password", autocomplete: "current-password" })) : null;
+    const row = el("div", "ss-row");
+    const tb = el("button", "go", "Test connection"); tb.type = "button";
+    const add = el("button", "go solid", "Add"); add.type = "submit";
+    row.append(tb, add); f.appendChild(row);
+    tb.addEventListener("click", async () => { say.textContent = "Testing…"; help.hidden = true;
+      try { const r = await call("POST", "/studio/api/direct/test", { host: hs.value, shell: sh.value }); say.textContent = r.words; if (r.help) { help.textContent = r.help; help.hidden = false; } }
+      catch (e) { say.textContent = e.message; } });
+    f.addEventListener("submit", async (e) => { e.preventDefault(); say.textContent = "Testing, then adding…"; help.hidden = true;
+      try { const r = await call("POST", "/studio/api/direct", { name: nm.value, host: hs.value, shell: sh.value, note: nt.value, passcode: pc ? pc.value : "" });
+        draw(r.computers); say.textContent = `${r.words} ${nm.value} is added: a chat's tools offer it under Direct access.`; nm.value = hs.value = nt.value = ""; if (pc) pc.value = ""; }
+      catch (x) { say.textContent = x.message; const h2 = x.data && x.data.help; if (h2) { help.textContent = h2; help.hidden = false; } } });
+    host.append(f, say, help);
+    try { draw((await call("GET", "/studio/api/direct")).computers); } catch (e) { say.textContent = e.message; }
+  }
   async function loadSettings() {
     let d;
     try { d = await call("GET", "/studio/api/settings"); } catch (e) { return; }
@@ -811,30 +886,50 @@
         b.addEventListener("click", () => { seg.querySelectorAll("button").forEach((x) => x.setAttribute("aria-checked", String(x === b))); save({ [key]: v }); }); seg.appendChild(b); }
       r.appendChild(seg); host.appendChild(r);
     };
+    if (S.auth && S.auth.local) directSection(sec("Computers for Direct access",
+      "The model runs commands there with no prompts and no network filter, through this Mac's ssh, as ~/.ssh/config sets "
+      + "that name up. Give it a machine you'd be fine rebuilding; a VM here that shares this Mac's folders reaches them too."));
     const p = sec("Privacy", null);
     const facts = el("dl", "facts ss-facts");
     const fact = (k, v) => { const x = el("div"); x.append(el("dt", "", k), el("dd", "", v)); facts.appendChild(x); };
     fact("Stored in", d.root); fact("Access", "Folders 700, files 600. Not synced to iCloud. Each request needs this passcode or a paired device, also at home.");
     p.appendChild(facts);
-    segRow(p, "Lock when idle", "idle_lock_min", [[0, "Off"], [1, "1 min"], [5, "5 min"], [15, "15 min"], [30, "30 min"]]);
-    p.querySelectorAll("[aria-label='Lock when idle'] button").forEach((b, i) => b.addEventListener("click", () => {
-      if (S.auth && S.auth.local) { S.auth.idle_lock_min = [0, 1, 5, 15, 30][i]; lsSet(IDLE_MIN, S.auth.idle_lock_min); }
-    }));
-    p.appendChild(el("p", "ss-p", "On this Mac only (127.0.0.1:8711). With no mouse or keyboard input in StrixFold UI for that long, it locks and "
-      + "the window blurs until you enter the passcode. It hides the window; it doesn't clear it. Your phone is not affected."));
-    const lock = el("button", "go", "Lock now"); lock.type = "button";
-    lock.addEventListener("click", async () => { try { await call("POST", "/studio/api/auth/lock"); } catch (e) { /* locked either way */ } S.auth.unlocked = false; locked(); });
-    p.appendChild(lock);
-    const cf = el("form", "ss-pass"); cf.noValidate = true;
-    cf.appendChild(el("h3", "", "Change the passcode"));
-    const f1 = el("label", "s-field"); f1.appendChild(el("span", "", "Current passcode")); const i1 = el("input"); i1.type = "password"; i1.autocomplete = "current-password"; f1.appendChild(i1);
-    const f2 = el("label", "s-field"); f2.appendChild(el("span", "", "New passcode")); const i2 = el("input"); i2.type = "password"; i2.autocomplete = "new-password"; f2.appendChild(i2);
-    const err = el("p", "err"); const go = el("button", "go", "Change passcode"); go.type = "submit";
-    cf.append(f1, f2, err, go);
-    cf.addEventListener("submit", async (e) => { e.preventDefault(); err.textContent = "";
-      try { await call("POST", "/studio/api/auth/change", { old: i1.value, new: i2.value }); H.toast("Passcode changed; other devices sign in again"); loadSettings(); } catch (x) { err.textContent = x.message; } });
-    p.appendChild(cf);
+    if (S.auth && !S.auth.set) {  // skipped on the first screen: a passcode can be set here, on this Mac
+      p.appendChild(el("p", "ss-p", "No passcode: anything running as your Mac account can open your chats here (other accounts "
+        + "on this Mac can't). Private chats, your phone and the idle lock need one."));
+      const sf = el("form", "ss-pass"); sf.noValidate = true;
+      sf.appendChild(el("h3", "", "Set a passcode"));
+      const g1 = el("label", "s-field"); g1.appendChild(el("span", "", "New passcode")); const j1 = el("input"); j1.type = "password"; j1.autocomplete = "new-password"; g1.appendChild(j1);
+      const g2 = el("label", "s-field"); g2.appendChild(el("span", "", "Passcode again")); const j2 = el("input"); j2.type = "password"; j2.autocomplete = "new-password"; g2.appendChild(j2);
+      const serr = el("p", "err"); const sgo = el("button", "go", "Set passcode"); sgo.type = "submit";
+      sf.append(g1, g2, serr, sgo);
+      sf.addEventListener("submit", async (e) => { e.preventDefault(); serr.textContent = "";
+        if (j1.value !== j2.value) { serr.textContent = "The two passcodes differ."; return; }
+        try { await call("POST", "/studio/api/auth/set", { passcode: j1.value }); await checkAuth(); H.toast("Passcode set; other browsers sign in with it"); loadSettings(); }
+        catch (x) { serr.textContent = x.message; } });
+      p.appendChild(sf);
+    } else {
+      segRow(p, "Lock when idle", "idle_lock_min", [[0, "Off"], [1, "1 min"], [5, "5 min"], [15, "15 min"], [30, "30 min"]]);
+      p.querySelectorAll("[aria-label='Lock when idle'] button").forEach((b, i) => b.addEventListener("click", () => {
+        if (S.auth && S.auth.local) { S.auth.idle_lock_min = [0, 1, 5, 15, 30][i]; lsSet(IDLE_MIN, S.auth.idle_lock_min); }
+      }));
+      p.appendChild(el("p", "ss-p", "On this Mac only (127.0.0.1:8711). With no mouse or keyboard input in StrixFold UI for that long, it locks and "
+        + "the window blurs until you enter the passcode. It hides the window; it doesn't clear it. Your phone is not affected."));
+      const lock = el("button", "go", "Lock now"); lock.type = "button";
+      lock.addEventListener("click", async () => { try { await call("POST", "/studio/api/auth/lock"); } catch (e) { /* locked either way */ } S.auth.unlocked = false; locked(); });
+      p.appendChild(lock);
+      const cf = el("form", "ss-pass"); cf.noValidate = true;
+      cf.appendChild(el("h3", "", "Change the passcode"));
+      const f1 = el("label", "s-field"); f1.appendChild(el("span", "", "Current passcode")); const i1 = el("input"); i1.type = "password"; i1.autocomplete = "current-password"; f1.appendChild(i1);
+      const f2 = el("label", "s-field"); f2.appendChild(el("span", "", "New passcode")); const i2 = el("input"); i2.type = "password"; i2.autocomplete = "new-password"; f2.appendChild(i2);
+      const err = el("p", "err"); const go = el("button", "go", "Change passcode"); go.type = "submit";
+      cf.append(f1, f2, err, go);
+      cf.addEventListener("submit", async (e) => { e.preventDefault(); err.textContent = "";
+        try { await call("POST", "/studio/api/auth/change", { old: i1.value, new: i2.value }); H.toast("Passcode changed; other devices sign in again"); loadSettings(); } catch (x) { err.textContent = x.message; } });
+      p.appendChild(cf);
+    }
     p.appendChild(el("h3", "ss-sub", "Paired devices"));
+    if (S.auth && S.auth.skipped) p.appendChild(el("p", "ss-p", "Without a passcode, a browser on this Mac that you open with bin/halo-control signs straight back in."));
     const ul = el("ul", "ss-devs");
     for (const dv of d.devices) {
       const li = el("li");

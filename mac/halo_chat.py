@@ -1288,7 +1288,7 @@ class ChatAgent:
                     lines.append(f"Assistant: {text_of(m.get('content'))[:1500]}" + (f"\nCalled: {calls}" if calls else ""))
                 elif m["role"] == "tool":
                     out = STEER_RE.sub("", m["content"]) if isinstance(m.get("content"), str) else text_of(m.get("content"))
-                    lines.append(f"Result: {out[:SUMMARY_MESSAGE_CHARS]}")
+                    lines.append(f"Result: {_tools.ends(out, SUMMARY_MESSAGE_CHARS)}")  # its end too ("1 failed")
                     lines += [f"the user (while it worked): {said[:SUMMARY_MESSAGE_CHARS]}"
                               for said in (STEER_RE.findall(m["content"]) if isinstance(m.get("content"), str) else [])]
                 elif m in owner:
@@ -1728,9 +1728,8 @@ class ChatAgent:
                                                        **({"made": r["audit"]["file"]["id"]} if (r.get("audit") or {}).get("file") else {})),
                                  private=tctx.private)
                     room = ctx - EXTENT_PAD - SAFETY_TOKENS - MIN_REPLY - est_tokens(msgs, cpt) - int(tools_chars / cpt)
-                    cap = min(_tools.OUT_MODEL, max(0, room) * int(cpt) // max(1, len(calls)))
-                    text = REPEATED if same else r["text"] if len(r["text"]) <= cap else (
-                        r["text"][:cap] + f"\n(cut at {cap} characters to fit the conversation; ask for less)" if cap >= 400 else
+                    cap = min(_tools.READ_MODEL if name == "read_file" else _tools.OUT_MODEL, max(0, room) * int(cpt) // max(1, len(calls)))
+                    text = REPEATED if same else _tools.ends(r["text"], cap) if cap >= 400 or len(r["text"]) <= cap else (
                         "(No room left in the conversation for this output: answer with what you have.)")
                     msgs.append({"role": "tool", "tool_call_id": c["id"], "content": text})
                     cur.update(id=None, part=None)

@@ -28,6 +28,12 @@ MAC_OFF = True
 MAC_OFF_WHY = "Direct access on this Mac is switched off for now. Choose one of the other computers."
 
 
+# every Direct ssh, the connection test's too: this Mac's agent, forwarded ports and X11 never reach the computer, and
+# an unknown or changed host key is refused (ssh's own config can't turn these back on: the first value given wins)
+SSH_SAFE = ("-o", "ForwardAgent=no", "-o", "ForwardX11=no", "-o", "ClearAllForwardings=yes", "-o", "PermitLocalCommand=no",
+            "-o", "StrictHostKeyChecking=yes")
+
+
 def available(target):
     spec = TARGETS.get(target)
     return bool(spec) and not spec.get("unavailable") and not (target == "mac" and MAC_OFF)
@@ -49,7 +55,7 @@ def check_turn_on(body, chat, model_id, **unused):
     return {"computer": target}
 
 
-NO_COMPUTER = "No computer is set up for it yet: add one under direct_targets in config.json"  # (the page adds the full stop)
+NO_COMPUTER = "No computer is set up for it yet: add one under direct_targets in config.json (the README's Direct access says how)"  # (the page adds the full stop)
 
 
 def offered(model_id):
@@ -91,7 +97,7 @@ done
 wait "$pid"
 '''
         encoded = base64.b64encode(script.encode()).decode()
-        return ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", *spec.get("ssh_options", ()), spec["host"],
+        return ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", *SSH_SAFE, *spec.get("ssh_options", ()), spec["host"],
                 f'exec bash -c "$(printf %s {encoded} | base64 -d)"']
     script = f'''$ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -120,7 +126,7 @@ try {{
 }} finally {{ Stop-Job $job; Remove-Job $job -Force }}
 '''
     encoded = base64.b64encode(script.encode("utf-16le")).decode()
-    return ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", *spec.get("ssh_options", ()), spec["host"],
+    return ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", *SSH_SAFE, *spec.get("ssh_options", ()), spec["host"],
             "powershell.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand " + encoded]
 
 
@@ -228,7 +234,8 @@ class Direct(T.Toolset):
         started = time.monotonic()
         def stopped():
             current = ctx.store.chat(ctx.chat_id)
-            return ctx.stop.is_set() or T.level_of(current) != "direct" or T.opts_of(current).get("computer") != self.target
+            return ctx.stop.is_set() or T.level_of(current) != "direct" or T.opts_of(current).get("computer") != self.target \
+                or self.target not in TARGETS  # removed in Settings meanwhile
         try:
             if ctx.fake:
                 raise ValueError("Direct commands do not run in the demo.")
@@ -238,11 +245,13 @@ class Direct(T.Toolset):
             seconds = min(max(1, int(args.get("timeout_s") or 120)), 600, int(ctx.time_left()))
             if seconds < 1: return T.result("Turn time limit reached.", "Stopped", "stopped")
             argv = argv_for(self.target, args["command"], seconds)
+            spec = dict(TARGETS[self.target])  # as it was when it started (Settings may remove it meanwhile)
             code, output, reason = execute(argv, stopped, seconds, ctx.emit, os.path.expanduser("~"))
             from agents_web import untrusted
             status = "stopped" if reason else "ok" if code == 0 else "failed"
-            label = f"{TARGETS[self.target]['name']}: {step_summary(args)} · {reason or ('exit ' + str(code))}"
-            return T.result(label + "\n" + untrusted("command output", output[-T.OUT_MODEL:]), label, status, exit=code,
+            label = f"{spec['name']}: {step_summary(args)} · {reason or ('exit ' + str(code))}"
+            cap = max(400, T.OUT_MODEL - len(label + "\n" + untrusted("command output", "")))
+            return T.result(label + "\n" + untrusted("command output", T.ends(output, cap)), label, status, exit=code,
                             secs=round(time.monotonic()-started, 2), out=f"$ {args['command']}\n{output}"[-T.OUT_PAGE:],
                             computer=self.target)
         except (ValueError, KeyError, OSError) as exc:

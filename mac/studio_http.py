@@ -7,6 +7,7 @@ only with ranges). Nothing a request carries is logged.
 """
 import contextvars
 import gzip
+import hmac
 import json
 import os
 import re
@@ -196,6 +197,7 @@ def _light_step(t):
     return t
 
 
+DIRECT_HERE = "Computers for Direct access are added on the Mac itself."
 PRIVATE_MIN = _private.MIN_PASSCODE  # P4: the app's own minimum (6); a shorter entry is simply a wrong passcode
 LOCK_WAIT_S = 5  # how long Lock waits for a running Private answer to stop and keep its words
 
@@ -300,7 +302,7 @@ def _get(h):
             return send_json(h, 200, dict(https_page(h), set=S["auth"].is_set(), unlocked=False, local=False, https_only=True))
         d = device(h)
         local = client_local(h)
-        return send_json(h, 200, {"set": S["auth"].is_set(), "unlocked": bool(d), "local": local,
+        return send_json(h, 200, {"set": S["auth"].is_set(), "skipped": local and S["auth"].skipped(), "unlocked": bool(d), "local": local,
                                   "device": d and d["label"], "remember": bool(d and d["remember"]),
                                   # the Mac's idle lock (studio.js): minutes, 0 = off; never on the phone or tailnet page
                                   "idle_lock_min": S["store"].settings().get("idle_lock_min", 0) if local else 0})
@@ -391,6 +393,11 @@ def _get(h):
             if not m or m.get("chat_id") != parts[1]:
                 return send_json(h, 404, {"error": "no such message"})
             return send_json(h, 200, {"id": m["id"], "meta": m["meta"]})
+        if parts == ["direct"]:  # Settings' computers for Direct access (direct_setup.py): this Mac only
+            if not client_local(h):
+                return send_json(h, 403, {"error": DIRECT_HERE})
+            import direct_setup
+            return send_json(h, 200, {"computers": direct_setup.computers()})
         if parts == ["settings"]:
             return send_json(h, 200, {"settings": st.settings(), "root": st.root,
                                       "devices": S["auth"].devices(), "this_device": d["id"]})
@@ -427,8 +434,17 @@ def _write(h, method):
     parts = u.path.strip("/").split("/")[2:]
     try:
         if parts == ["auth", "setup"] and method == "POST":
-            auth.setup(b.get("passcode"), local)
+            key = getattr(A, "open_key", None)  # none: nobody sets the first passcode (serve() always makes one)
+            key_ok = bool(key) and hmac.compare_digest(str(b.get("key") or "").encode(), key.encode())
+            auth.setup(b.get("passcode"), local, signed_in=bool(device(h)), key_ok=key_ok)
             token, did = auth.new_session(True, label_of(h), ip)
+            return send_json(h, 200, {"ok": True}, cookie=cookie(token, True, secure(h)))
+        if parts == ["auth", "skip"] and method == "POST":  # no passcode, on this Mac only (the first screen's Skip)
+            key = getattr(A, "open_key", None)
+            ok = bool(key) and hmac.compare_digest(str(b.get("key") or "").encode(), key.encode())
+            token, did = auth.skip(local, ok, label_of(h), ip, studio.cookie_value(h.headers.get("Cookie")))
+            import halo_control
+            halo_control.write_open_key(A, A.cfg["ui_port"])  # a new key: the one in this browser's history is dead now
             return send_json(h, 200, {"ok": True}, cookie=cookie(token, True, secure(h)))
         if parts == ["auth", "unlock"] and method == "POST":
             if not auth.verify(b.get("passcode"), ip, local):
@@ -467,6 +483,28 @@ def _write(h, method):
         if parts == ["private", "lock"] and method == "POST":
             lock_private(S)
             return send_json(h, 200, private_view(S))
+        if parts == ["auth", "set"] and method == "POST":  # a passcode after a Skip, from Settings on this Mac
+            auth.setup(b.get("passcode"), local, signed_in=True)  # every session made without one ends
+            token, did = auth.new_session(True, d["label"], ip)
+            return send_json(h, 200, {"ok": True}, cookie=cookie(token, True, secure(h)))
+        if parts[:1] == ["direct"]:  # add, test and remove a computer for Direct access: this Mac only, never the phone
+            if not local:
+                return send_json(h, 403, {"error": DIRECT_HERE})
+            import direct_setup
+            if parts == ["direct", "test"] and method == "POST":
+                if b.get("id"):  # a listed computer, with its own ssh options
+                    return send_json(h, 200, direct_setup.test_listed(str(b["id"])))
+                return send_json(h, 200, direct_setup.test(b.get("host"), b.get("shell")))
+            if parts == ["direct"] and method == "POST":
+                if auth.is_set() and not auth.verify(b.get("passcode"), ip, local):  # a shell on that computer: ask again
+                    time.sleep(0.4)
+                    return send_json(h, 403, {"error": "That passcode is not right."})
+                cid, t = direct_setup.add(b.get("name"), b.get("host"), b.get("shell"), b.get("note") or "")
+                return send_json(h, 200 if cid else 409, dict(t, id=cid, computers=direct_setup.computers(), **({} if cid else {"error": t["words"]})))
+            if len(parts) == 2 and method == "DELETE":
+                direct_setup.remove(parts[1])
+                return send_json(h, 200, {"computers": direct_setup.computers()})
+            return send_json(h, 404, {"error": "not found"})
         if parts == ["auth", "lock"] and method == "POST":
             lock_private(S)  # the app's own lock locks Private too
             auth.revoke(d["id"])

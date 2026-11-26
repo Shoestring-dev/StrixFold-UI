@@ -4,6 +4,16 @@
 // Theme row under Appearance in Settings (#/studio-settings, the sidebar's avatar).
 (() => {
   "use strict";
+  // bin/halo-control opens the app with this run's key after #k= (halo_control.write_open_key): kept for this tab only,
+  // and taken out of the address before anything else reads it, so it isn't in the history or a bookmark
+  const k = /^#k=([A-Za-z0-9_-]{20,64})$/.exec(location.hash);
+  if (k) {
+    try { sessionStorage.setItem("halo.open-key", k[1]); } catch (e) { /* this tab can't skip, then */ }
+    history.replaceState(null, "", location.pathname + location.search + "#/talk");
+  }
+})();
+(() => {
+  "use strict";
   const KEY = "halo.theme", root = document.documentElement;
   const get = () => { try { const v = localStorage.getItem(KEY); return v === "light" || v === "dark" ? v : "system"; } catch (e) { return "system"; } };
   function apply(v) {

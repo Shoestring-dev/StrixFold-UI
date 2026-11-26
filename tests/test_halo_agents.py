@@ -1834,7 +1834,8 @@ class Routes(Base):
     def unlock(self):
         import http.client
         c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
-        c.request("POST", "/studio/api/auth/setup", json.dumps({"passcode": "test-passcode-1"}),
+        self.happ.open_key = self.happ.open_key if getattr(self.happ, "open_key", None) else "test-open-key-0123456789abcdef"
+        c.request("POST", "/studio/api/auth/setup", json.dumps({"passcode": "test-passcode-1", "key": self.happ.open_key}),
                   {"Host": self.host, "Content-Type": "application/json", "X-Halo-UI-Token": self.happ.ui_token, "Origin": f"http://{self.host}"})
         r = c.getresponse()
         r.read()

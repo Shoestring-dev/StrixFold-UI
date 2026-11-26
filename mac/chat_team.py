@@ -29,6 +29,7 @@ to finish; Stop (the user's, Stop all, the lead's stop_agent) stops what it is d
 (Stop now, or WRAP_GRACE_S without one: at once, its latest check-in in what comes back); after LONG_NOTICE_S of work
 the user gets a notice, once. Nothing caps its work.
 """
+import hashlib
 import http.client
 import json
 import os
@@ -1097,7 +1098,8 @@ class Team:
     def _watch_call(self, a, name, args, text, status, line=None):
         """After each tool call: the same call with the same result again and again, or failures in a row. Returns why
         the agent should wrap up now, or None."""
-        sig = (name, json.dumps(args, sort_keys=True, default=str), str(text)[:2000])
+        sig = (name, json.dumps(args, sort_keys=True, default=str), hashlib.sha256(str(text).encode("utf-8", "replace")).hexdigest())  # the whole
+        # result: a growing log polled with one command begins the same each time (review), so a prefix said "looping"
         with self.mu:
             sigs = (a.get("_sigs") or [])[-(LOOP_STOP - 1):] + [sig]
             a["_sigs"] = sigs
@@ -1354,7 +1356,7 @@ class Team:
                             text = DENIED  # so ("the user did not allow this ... say what you wanted instead" ended agents)
                     self._update(a, ev, status=st, line=res.get("line") or line, secs=round(time.time() - t1, 1),
                                  result=clip(res.get("out") or text, LOG_TEXT))
-                    messages.append({"role": "tool", "tool_call_id": c.get("id") or "", "content": clip(text, T.OUT_MODEL)})
+                    messages.append({"role": "tool", "tool_call_id": c.get("id") or "", "content": T.ends(text, T.READ_MODEL if name == "read_file" and len(calls) == 1 else T.OUT_MODEL)})
                     wrap = wrap or self._watch_call(a, name, args, text, st, line)
                     if a["_stop"].is_set():
                         raise Stopped()

@@ -809,6 +809,18 @@ class Turns(Base):
                          [("write_file", "mac", "folder", "full"), ("run_command", "mac", "folder", "full")])
         self.assertEqual(lines[1]["out_sha256"], hashlib.sha256(b"hi from the folder\n").hexdigest())
 
+    def test_a_long_outputs_first_and_last_lines_reach_the_model_cut_once(self):
+        """It was cut to its end (lead_tools.tail) and then to its beginning and end: the first line never came, two
+        notes (review)."""
+        c, _ = self.full_chat()
+        self.script += [{"calls": [("run_command", {"command": "echo FIRST-LINE; for i in $(seq 1 3000); do echo \"case_$i ok\"; done; echo '1 failed, 2999 passed'"})]}, {"text": "ok"}]
+        self.turn(c)
+        out = next(m for m in self.bodies[-1]["messages"] if m["role"] == "tool")["content"]
+        for words in ("Exit code 0.", "FIRST-LINE", "1 failed, 2999 passed"):
+            self.assertIn(words, out)
+        self.assertEqual(out.count("left out"), 1)
+        self.assertLessEqual(len(out), self.T.OUT_MODEL)
+
     def test_a_running_commands_output_shows_while_it_runs(self):
         c, _ = self.full_chat()
         self.script += [{"calls": [("run_command", {"command": "for i in 1 2 3; do echo line$i; sleep 0.5; done"})]}, {"text": "ok"}]

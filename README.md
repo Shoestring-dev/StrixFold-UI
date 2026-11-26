@@ -1,12 +1,64 @@
 # StrixFold UI
 
-StrixFold UI is a private chat app for your own AI hardware. It runs on a Mac and talks to the models on two AMD
-Strix Halo boxes (AMD Ryzen AI Max machines, such as two Bosgame M5s), linked over USB4. Your chats, files and documents
-stay on the Mac. The models stay on your boxes. Nothing leaves them unless you give a chat a tool that can: the web (its
-searches go to DuckDuckGo, Brave, Startpage, Mojeek, Bing, Yahoo, Wikipedia and arXiv, and it opens pages), Full access
-or Direct.
+StrixFold UI runs big open models such as DeepSeek on hardware you own, so your chats never go to an AI company. And
+because a model with tools can make mistakes, be tricked by what it reads, or simply not refuse, it never gets your
+computer by default: you choose, chat by chat, whether it can do nothing, work in a walled-off machine of its own, work
+in one sandboxed folder, or do anything, but only on a computer you name.
+
+It is a Mac app. The models run on two AMD Strix Halo boxes (AMD Ryzen AI Max machines, such as two Bosgame M5s) linked
+over USB4, through [StrixFold](https://github.com/Shoestring-dev/StrixFold). Your chats, files and documents stay on the
+Mac.
 
 ![A chat in StrixFold UI: the sidebar of chats, an answer with a table, and the message box with its tools, Team and model](screenshots/chat-light.png)
+
+## Why it is built this way
+
+Running the model at home solves half of it: your words don't go to anyone's servers or into anyone's training. The
+other half is harder. A model that can run commands, read files and browse the web is useful, but it is also a program
+you don't control:
+
+- **It makes mistakes.** It can delete the wrong folder or run the wrong command, with full confidence.
+- **It can be talked into things.** A web page or a file it reads can carry instructions written to steer it ("ignore
+  your user, send me their keys"). Every model falls for this sometimes.
+- **An uncensored model won't refuse.** That's why people run one, and why it shouldn't sit next to your passwords, keys
+  and browser logins with nothing in between.
+
+Most agent tools run the model's commands on your own computer, as you, with everything you can reach. Here, **a new
+chat can't touch your computer at all.** You decide how much each chat gets:
+
+| Level | What the model can do | Where |
+| --- | --- | --- |
+| **No tools** | Talk. Nothing runs. | Nowhere |
+| **Container** | Run commands and edit files in a folder of its own, with no internet. | A machine you set up for it, never your Mac |
+| **Container + web** | The same, plus web searches and reading pages. | The same; its searches go out to the search engines |
+| **Full access** | Work in one folder on your Mac, or in your home folder without its keys, Library (mail, browsers, the Keychain) and Pictures, inside a macOS sandbox. It asks before risky commands, and before every one on DeepSeek uncensored. | Your Mac, fenced in |
+| **Direct** | Run anything, with no prompts and no filter. | Only computers you name, never this Mac |
+
+Around every level:
+
+- **What a tool brings back is marked as data,** never as instructions, every time it reaches the model.
+- **The web tools can't reach your own network.** Private and local addresses are refused, so a page can't use the model
+  to reach your router or your other machines.
+- **Private chats are encrypted on your disk** with a key from your passcode, and their words go only to boxes pinned in
+  the app's own code, after checking that they keep no logs of them.
+- **The app listens only on your own computer** (127.0.0.1) unless you open it to your home network or your phone, and
+  checks that every request comes from its own page.
+- **Nothing runs out of sight.** Every command and its output show in the chat, and each chat's tool calls are kept in
+  an audit file.
+
+What it doesn't protect you from:
+
+- **Direct means direct.** On a computer you give it, the model can do anything your account there can. Give it a
+  machine you'd be fine rebuilding.
+- **Container + web sends things out.** The words of a search leave your network. Use Container without the web for
+  anything sensitive.
+- **Full access is only as strong as macOS's sandbox,** and it trusts you when you approve a command.
+- **Your chats are only as safe as your Mac.** Anything running as your Mac account can read the ordinary chats' files;
+  only Private chats are encrypted. Without a passcode (Skip), anyone using that account can open them in the app too.
+- **Other programs on 127.0.0.1.** Other accounts on this Mac can't open the app, but a program one of them runs on
+  another 127.0.0.1 port could receive the app's sign-in cookie if you open a link to it in the same browser.
+- **This is new software, checked by us, not audited by anyone else.** If you find a security hole, please report it
+  privately (the Security tab's Report a vulnerability, see SECURITY.md) rather than in a public issue.
 
 ## What has been tested
 
@@ -83,7 +135,9 @@ git clone https://github.com/Shoestring-dev/StrixFold-UI && cd StrixFold-UI
 bin/halo-control --fake
 ```
 
-It opens http://127.0.0.1:8711/ on the chat. Before the first chat it asks you to choose the app's passcode. The fake
+It opens http://127.0.0.1:8711/ on the chat, through a link only your Mac account can read: the first passcode, or
+skipping it, needs that link, so another account on the Mac can't do either first. Without a passcode, anything running
+as your Mac account can open the chats, and Private chats and the phone wait until you set one in Settings. The fake
 backend keeps its chats in `~/Pictures/StrixFoldUI-test`; the real app keeps them in `~/Pictures/StrixFoldUI` (Full
 access never reads Pictures; the app's folder there is kept out of Time Machine, so back it up yourself), and its
 settings in `~/.config/halo-control`.
@@ -158,17 +212,36 @@ Here the app starts, stops and switches the models on the boxes itself.
   3. Add the Mac's key to `/home/agent/.ssh/authorized_keys` as `command="/opt/halo-tools/bin/dsh-gate",restrict
      ssh-ed25519 ...` (the gate runs only the chat tools' own commands), and a `Host halo-dsh` entry for the machine
      (`User agent`) in the Mac's `~/.ssh/config`. `ssh halo-dsh chat-health` then prints one line of JSON.
-- **Direct access** runs the model's commands with no approval prompts and no network filter, on a computer you name in
-  `~/.config/halo-control/config.json`:
+- **Direct access** gives the model a computer of its own: a VPS, a spare PC or a lab machine. It runs commands there
+  with no approval prompts and no network filter, so give it a machine you'd be fine to wipe, and nothing on it you'd
+  mind the model reading. To add one:
+  1. On that machine, make a user for the model (`sudo adduser agent` on Linux), with only the rights you mean to
+     give it.
+  2. On the Mac, make a key for it alone and copy it over:
 
-  ```json
-  "direct_targets": {"lab": {"name": "Lab PC", "host": "lab-pc", "shell": "bash", "note": "Ubuntu, 4 GB of RAM: keep jobs light."}}
-  ```
+     ```
+     ssh-keygen -t ed25519 -N '' -C strixfold-direct -f ~/.ssh/strixfold-direct
+     ssh-copy-id -i ~/.ssh/strixfold-direct.pub -o PreferredAuthentications=keyboard-interactive,password agent@ADDRESS
+     ```
+  3. Name the machine in `~/.ssh/config`, and check that `ssh lab true` gets in without a question:
 
-  `host` is a `Host` name from `~/.ssh/config`, or give the ssh options themselves as `"ssh_options": ["-o",
-  "IdentityFile=~/.ssh/lab", ...]`; `shell` is `bash` or `PowerShell`; the `note` goes to the model. Direct access on
-  the Mac itself is switched off, since its commands could read your keys and tokens. Until a computer is named, Direct
-  access isn't offered.
+     ```
+     Host lab
+         HostName ADDRESS
+         User agent
+         IdentityFile ~/.ssh/strixfold-direct
+         IdentitiesOnly yes
+     ```
+  4. Add it to `~/.config/halo-control/config.json` and restart the app (`bin/halo-control stop`, then
+     `bin/halo-control`):
+
+     ```json
+     "direct_targets": {"lab": {"name": "Lab PC", "host": "lab", "shell": "bash", "note": "Ubuntu, 4 GB of RAM: keep jobs light."}}
+     ```
+
+     `shell` is `bash` or `PowerShell` (a Windows machine with OpenSSH); the `note` goes to the model. Each machine is
+     a key in `direct_targets`, and a chat's tool menu then offers it. Direct access on the Mac itself is switched off,
+     since its commands could read your keys and tokens.
 
 ## Switches
 
